@@ -1,12 +1,21 @@
 # Avion
 
-Simple Electron application repository.
+Electron control surface with a native C++ Windows Graphics Capture preview host.
 
-## 설명
+## Requirements
 
-이 저장소는 Avion 애플리케이션을 위한 프로젝트입니다.
+- Windows 10 1903 or newer
+- Visual Studio 2022 Build Tools
+- Desktop development with C++ workload
+- Windows 10/11 SDK
 
-## 시작
+## Run
 
-1. `npm install`
-2. `npm start`
+```powershell
+cd electron
+npm install
+npm run build:native
+npm start
+```
+
+Press the ON/OFF button in Electron to start or stop the native capture preview window. The first native host captures the primary display through Windows Graphics Capture and renders frames through Direct3D 11.
