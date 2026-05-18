@@ -6,13 +6,37 @@
     <meta http-equiv="X-Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="./styles.css">
-    <title>Capture Toggle</title>
+    <title>Avion Capture</title>
   </head>
   <body>
     <main class="app">
-      <button id="capture-toggle" class="toggle-button" type="button" aria-pressed="false">
-        OFF
-      </button>
+      <section class="control-panel" aria-label="Capture control">
+        <div class="capture-header">
+          <div>
+            <p class="eyebrow">Avion</p>
+            <h1>Game Capture</h1>
+          </div>
+          <div id="status-pill" class="status-pill">Idle</div>
+        </div>
+
+        <button id="capture-toggle" class="toggle-button" type="button" aria-pressed="false">
+          <span class="power-light" aria-hidden="true"></span>
+          <span id="capture-toggle-label">OFF</span>
+        </button>
+
+        <div class="capture-meta">
+          <div>
+            <span class="meta-label">Source</span>
+            <strong>Primary display</strong>
+          </div>
+          <div>
+            <span class="meta-label">Engine</span>
+            <strong>C++ Windows Graphics Capture</strong>
+          </div>
+        </div>
+
+        <p id="capture-message" class="capture-message">Ready</p>
+      </section>
     </main>
     <script src="./renderer.js"></script>
   </body>
