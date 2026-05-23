@@ -8,6 +8,7 @@
   "main": "index.js",
   "scripts": {
     "build:native": "powershell -ExecutionPolicy Bypass -File ./scripts/build-native.ps1",
+    "extract:frames": "powershell -ExecutionPolicy Bypass -File ./scripts/extract-video-frames.ps1",
     "start": "electron .",
     "test": "test"
   },

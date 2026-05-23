@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('captureControl', {
-  setEnabled: (enabled) => ipcRenderer.invoke('capture:set-enabled', enabled),
+  setEnabled: (enabled, options) => ipcRenderer.invoke('capture:set-enabled', enabled, options),
   getStatus: () => ipcRenderer.invoke('capture:get-status'),
   onStatus: (callback) => {
     const handler = (_event, status) => callback(status)

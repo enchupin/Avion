@@ -72,6 +72,12 @@ h1 {
   color: #08734f;
 }
 
+.status-pill[data-status='stopping'] {
+  border-color: #f0b429;
+  background: #fff8e1;
+  color: #8a5a00;
+}
+
 .status-pill[data-status='failed'],
 .status-pill[data-status='exited'],
 .status-pill[data-status='missing-host'] {
@@ -133,6 +139,36 @@ h1 {
 .toggle-button.is-on .power-light {
   background: #99f6c7;
   box-shadow: 0 0 18px rgba(153, 246, 199, 0.75);
+}
+
+.capture-options {
+  margin-top: 18px;
+}
+
+.option-toggle {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  color: #344054;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.option-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #0f8f5f;
+}
+
+.option-toggle input:disabled {
+  cursor: not-allowed;
+}
+
+.option-toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.64;
 }
 
 .capture-meta {

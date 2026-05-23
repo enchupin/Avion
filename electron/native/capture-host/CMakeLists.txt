@@ -18,6 +18,8 @@ target_compile_definitions(AvionCaptureHost PRIVATE
 target_link_libraries(AvionCaptureHost PRIVATE
   d3d11
   dxgi
+  shell32
   user32
+  windowscodecs
   windowsapp
 )

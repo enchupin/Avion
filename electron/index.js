@@ -5,6 +5,9 @@ const path = require('path')
 
 let captureEnabled = false
 let captureProcess = null
+let lastRecordingPath = null
+let lastRecordingMode = null
+let captureSessionCounter = 0
 const windows = new Set()
 
 function getCaptureHostCandidates () {
@@ -36,13 +39,53 @@ function captureState (overrides = {}) {
   return {
     enabled: captureEnabled,
     pid: captureProcess?.pid ?? null,
+    recordingPath: lastRecordingPath,
+    recordingMode: lastRecordingMode,
     ...overrides
   }
 }
 
-function startCaptureHost () {
+function timestampForFileName (date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0')
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join('') + '-' + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join('')
+}
+
+function createRecordingPath (recordingMode) {
+  const recordingDir = path.join(app.getPath('videos'), 'Avion Captures')
+  fs.mkdirSync(recordingDir, { recursive: true })
+  const timestamp = timestampForFileName()
+  const sessionId = String(++captureSessionCounter).padStart(3, '0')
+  const baseName = `avion-capture-${timestamp}-${sessionId}`
+
+  for (let attempt = 0; attempt < 1000; ++attempt) {
+    const suffix = attempt === 0 ? '' : `-${String(attempt + 1).padStart(3, '0')}`
+    const uniqueBaseName = `${baseName}${suffix}`
+    const candidate = recordingMode === 'png-1fps'
+      ? path.join(recordingDir, `${uniqueBaseName}-1fps`)
+      : path.join(recordingDir, `${uniqueBaseName}.bgra`)
+
+    if (!fs.existsSync(candidate)) {
+      return candidate
+    }
+  }
+
+  const fallbackName = `avion-capture-${timestamp}-${sessionId}-${Date.now()}`
+  return recordingMode === 'png-1fps'
+    ? path.join(recordingDir, `${fallbackName}-1fps`)
+    : path.join(recordingDir, `${fallbackName}.bgra`)
+}
+
+function startCaptureHost (options = {}) {
   if (captureProcess && !captureProcess.killed) {
-    return captureState({ status: 'running' })
+    return captureState({ status: captureEnabled ? 'running' : 'stopping' })
   }
 
   const hostPath = findCaptureHost()
@@ -55,15 +98,20 @@ function startCaptureHost () {
   }
 
   try {
-    captureProcess = spawn(hostPath, [], {
+    const recordingMode = options.oneFramePerSecond ? 'png-1fps' : 'raw-bgra'
+    lastRecordingMode = recordingMode
+    lastRecordingPath = createRecordingPath(recordingMode)
+    captureProcess = spawn(hostPath, ['--record', '--record-mode', recordingMode, '--record-path', lastRecordingPath], {
       cwd: path.dirname(hostPath),
       detached: false,
-      stdio: 'ignore',
+      stdio: ['pipe', 'ignore', 'ignore'],
       windowsHide: false
     })
   } catch (error) {
     captureEnabled = false
     captureProcess = null
+    lastRecordingPath = null
+    lastRecordingMode = null
     return captureState({
       status: 'failed',
       message: error.message
@@ -101,12 +149,28 @@ function startCaptureHost () {
   })
 
   child.unref()
-  return captureState({ status: 'running' })
+  return captureState({ status: 'running', recordingMode: options.oneFramePerSecond ? 'png-1fps' : 'raw-bgra' })
 }
 
 function stopCaptureHost () {
   if (captureProcess && !captureProcess.killed) {
-    captureProcess.kill()
+    const child = captureProcess
+    captureEnabled = false
+
+    try {
+      child.stdin?.write('stop\n')
+      child.stdin?.end()
+    } catch {
+      child.kill()
+    }
+
+    setTimeout(() => {
+      if (captureProcess === child && !child.killed) {
+        child.kill()
+      }
+    }, 3000)
+
+    return captureState({ status: 'stopping' })
   }
 
   captureProcess = null
@@ -127,8 +191,8 @@ function createWindow () {
   win.loadFile('index.html')
 }
 
-ipcMain.handle('capture:set-enabled', (_event, enabled) => {
-  const state = enabled ? startCaptureHost() : stopCaptureHost()
+ipcMain.handle('capture:set-enabled', (_event, enabled, options = {}) => {
+  const state = enabled ? startCaptureHost(options) : stopCaptureHost()
   broadcastCaptureStatus(state)
   return state
 })
