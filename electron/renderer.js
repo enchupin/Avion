@@ -2,16 +2,22 @@ const toggleButton = document.getElementById('capture-toggle')
 const toggleLabel = document.getElementById('capture-toggle-label')
 const statusPill = document.getElementById('status-pill')
 const captureMessage = document.getElementById('capture-message')
+const oneFpsToggle = document.getElementById('one-fps-toggle')
 
 let isCaptureEnabled = false
 let isBusy = false
 
 const statusCopy = {
   running: 'Running',
+  stopping: 'Stopping',
   stopped: 'Idle',
   exited: 'Exited',
   failed: 'Failed',
   'missing-host': 'Build required'
+}
+
+function recordingPathMessage (path) {
+  return path ? ` Saving to: ${path}` : ''
 }
 
 function renderToggleState (state = {}) {
@@ -22,6 +28,7 @@ function renderToggleState (state = {}) {
   toggleButton.classList.toggle('is-on', isCaptureEnabled)
   toggleButton.setAttribute('aria-pressed', String(isCaptureEnabled))
   toggleButton.disabled = isBusy
+  oneFpsToggle.disabled = isBusy || isCaptureEnabled
 
   statusPill.textContent = statusCopy[status] ?? status
   statusPill.dataset.status = status
@@ -29,11 +36,15 @@ function renderToggleState (state = {}) {
   if (state.message) {
     captureMessage.textContent = state.message
   } else if (status === 'running') {
-    captureMessage.textContent = `Native preview window active${state.pid ? ` (PID ${state.pid})` : ''}`
+    captureMessage.textContent = `Native preview window active${state.pid ? ` (PID ${state.pid})` : ''}.${recordingPathMessage(state.recordingPath)}`
+  } else if (status === 'stopping') {
+    captureMessage.textContent = `Finalizing capture${state.recordingPath ? `: ${state.recordingPath}` : ''}`
   } else if (status === 'missing-host') {
     captureMessage.textContent = 'Run npm run build:native before starting capture.'
   } else if (status === 'exited') {
     captureMessage.textContent = `Native capture host exited${state.exitCode === null ? '' : ` with code ${state.exitCode}`}`
+  } else if (status === 'stopped' && state.recordingPath) {
+    captureMessage.textContent = `Saved capture: ${state.recordingPath}`
   } else {
     captureMessage.textContent = 'Ready'
   }
@@ -48,7 +59,9 @@ toggleButton.addEventListener('click', async () => {
   renderToggleState({ enabled: isCaptureEnabled, status: isCaptureEnabled ? 'running' : 'stopped' })
 
   try {
-    const state = await window.captureControl.setEnabled(!isCaptureEnabled)
+    const state = await window.captureControl.setEnabled(!isCaptureEnabled, {
+      oneFramePerSecond: oneFpsToggle.checked
+    })
     renderToggleState(state)
   } catch (error) {
     renderToggleState({
@@ -59,6 +72,7 @@ toggleButton.addEventListener('click', async () => {
   } finally {
     isBusy = false
     toggleButton.disabled = false
+    oneFpsToggle.disabled = isCaptureEnabled
   }
 })
 
