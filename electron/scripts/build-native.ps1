@@ -3,6 +3,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $sourceDir = Join-Path $root "native\capture-host"
 $buildDir = Join-Path $sourceDir "build"
+$builtExe = Join-Path $buildDir "Release\AvionCaptureHost.exe"
+$bundledExe = Join-Path $root "native\AvionCaptureHost.exe"
 
 $vswhereCandidates = @(
   (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"),
@@ -44,4 +46,11 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
+if (-not (Test-Path $builtExe)) {
+  throw "Expected build output was not found at $builtExe."
+}
+
+Copy-Item -Force -Path $builtExe -Destination $bundledExe
+
 Write-Host "Built AvionCaptureHost.exe"
+Write-Host "Copied native host to $bundledExe"

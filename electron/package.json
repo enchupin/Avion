@@ -1,7 +1,7 @@
 {
-  "name": "electron",
+  "name": "avion",
   "version": "1.0.0",
-  "description": "electron",
+  "description": "Avion capture control app",
   "license": "ISC",
   "author": "",
   "type": "commonjs",
@@ -9,10 +9,12 @@
   "scripts": {
     "build:native": "powershell -ExecutionPolicy Bypass -File ./scripts/build-native.ps1",
     "extract:frames": "powershell -ExecutionPolicy Bypass -File ./scripts/extract-video-frames.ps1",
+    "package": "powershell -ExecutionPolicy Bypass -File ./scripts/package-app.ps1",
     "start": "electron .",
     "test": "test"
   },
   "devDependencies": {
+    "@electron/packager": "^20.0.0",
     "electron": "^42.1.0"
   }
 }
