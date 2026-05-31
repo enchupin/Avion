@@ -15,11 +15,13 @@ function getCaptureHostCandidates () {
   const unpackedPath = process.resourcesPath
     ? path.join(process.resourcesPath, 'native', executable)
     : null
+  const bundledPath = path.join(__dirname, 'native', executable)
 
   return [
+    unpackedPath,
+    bundledPath,
     path.join(__dirname, 'native', 'capture-host', 'build', 'Release', executable),
-    path.join(__dirname, 'native', 'capture-host', 'build', 'Debug', executable),
-    unpackedPath
+    path.join(__dirname, 'native', 'capture-host', 'build', 'Debug', executable)
   ].filter(Boolean)
 }
 

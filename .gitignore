@@ -16,4 +16,30 @@ Thumbs.db
 # Build outputs
 /dist/
 /build/
+*.exe
+/electron/dist/
 /electron/native/capture-host/build/
+
+# TSD-SR local data, model weights, and generated files
+/SR/TSD-SR-main/.idea/
+/SR/TSD-SR-main/.venv/
+/SR/TSD-SR-main/checkpoint/
+/SR/TSD-SR-main/data/DIV2K/
+/SR/TSD-SR-main/dataset/
+/SR/TSD-SR-main/StableSR_testsets/
+/SR/TSD-SR-main/logs/
+/SR/TSD-SR-main/outputs/
+/SR/TSD-SR-main/tmp/
+/SR/TSD-SR-main/**/__pycache__/
+/SR/TSD-SR-main/**/*.py[cod]
+/SR/TSD-SR-main/**/*.safetensors
+/SR/TSD-SR-main/**/*.ckpt
+/SR/TSD-SR-main/**/*.pt
+/SR/TSD-SR-main/**/*.pth
+/SR/TSD-SR-main/**/*.onnx
+/SR/TSD-SR-main/**/*.bin
+/SR/TSD-SR-main/**/*.zip
+/SR/TSD-SR-main/**/*.tar
+/SR/TSD-SR-main/**/*.tar.gz
+/SR/TSD-SR-main/**/*.7z
+/SR/TSD-SR-main/**/*.rar
