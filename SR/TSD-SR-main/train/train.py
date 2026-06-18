@@ -2,6 +2,7 @@
 # coding=utf-8
 import argparse
 import datetime
+import gc
 import logging
 import math
 import os
@@ -38,7 +39,9 @@ from diffusers.utils import (
 from diffusers.utils.torch_utils import is_compiled_module
 from models.autoencoder_kl import AutoencoderKL
 from utils.util import load_lora_state_dict
+from utils.model_family import DEFAULT_PROMPT
 from data.data import Real_ESRGAN_Dataset
+from data.process import prepare_training_images, run_encode_prompt, run_vae_encode
 
 if is_wandb_available():
     import wandb
@@ -112,18 +115,46 @@ def parse_args(input_args=None):
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
-        "--teacher_model_name_or_path",
-        type=str,
-        default=None,
-        required=False,
-        help="Optional teacher base model path. If omitted, the student base model path is reused for the teacher.",
-    )
-    parser.add_argument(
         "--checkpoint_path",
         type=str,
         default=None,
         required=False,
         help="Path to checkpoint",
+    )
+    parser.add_argument(
+        "--train_data_dir",
+        type=str,
+        default=None,
+        help="Prepared training dataset directory. Defaults to data/DIV2K/train unless --raw_train_image_dir is set.",
+    )
+    parser.add_argument(
+        "--raw_train_image_dir",
+        type=str,
+        default=None,
+        help="Raw image file or directory. If set, images are prepared and cached before training starts.",
+    )
+    parser.add_argument(
+        "--prepare_process_size",
+        type=int,
+        default=512,
+        help="Square crop/resize size used when preparing raw images.",
+    )
+    parser.add_argument(
+        "--prepare_downscale_factor",
+        type=int,
+        default=4,
+        help="Bicubic degradation downscale factor used when preparing raw images.",
+    )
+    parser.add_argument(
+        "--prepare_prompt",
+        type=str,
+        default=DEFAULT_PROMPT,
+        help="Prompt text written for raw images during automatic dataset preparation.",
+    )
+    parser.add_argument(
+        "--overwrite_prepared_data",
+        action="store_true",
+        help="Overwrite existing prepared gt/lr/prompt files before training.",
     )
     parser.add_argument(
         "--default_embedding_dir", 
@@ -397,6 +428,51 @@ def collate_fn(examples, weight_dtype=torch.float16):
              }
     return batch
 
+
+def _resolve_train_data_dir(args):
+    if args.train_data_dir:
+        return args.train_data_dir
+    if args.raw_train_image_dir:
+        return os.path.join("data", "custom", "train")
+    return os.path.join("data", "DIV2K", "train")
+
+
+def _prepare_train_data_if_needed(args, accelerator):
+    args.train_data_dir = _resolve_train_data_dir(args)
+    if not args.raw_train_image_dir:
+        return
+
+    with accelerator.main_process_first():
+        if accelerator.is_main_process:
+            logger.info("Preparing training images from %s", args.raw_train_image_dir)
+            prepare_training_images(
+                args.raw_train_image_dir,
+                args.train_data_dir,
+                process_size=args.prepare_process_size,
+                downscale_factor=args.prepare_downscale_factor,
+                prompt_text=args.prepare_prompt,
+                overwrite=args.overwrite_prepared_data,
+            )
+            if args.overwrite_prepared_data:
+                for cache_dir in ("prompt_embeds", "pool_embeds", "latent_hr"):
+                    shutil.rmtree(os.path.join(args.train_data_dir, cache_dir), ignore_errors=True)
+            logger.info("Preparing prompt embedding cache in %s", args.train_data_dir)
+            run_encode_prompt(
+                [args.train_data_dir],
+                pretrained_model_name_or_path=args.pretrained_model_name_or_path,
+                device=str(accelerator.device),
+                model_family="auto",
+            )
+            logger.info("Preparing HR latent cache in %s", args.train_data_dir)
+            run_vae_encode(
+                [args.train_data_dir],
+                pretrained_model_name_or_path=args.pretrained_model_name_or_path,
+                device=str(accelerator.device),
+            )
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
 def main(args):
     if torch.backends.mps.is_available() and args.mixed_precision == "bf16":
         # due to pytorch#99272, MPS does not yet support bfloat16.
@@ -442,25 +518,26 @@ def main(args):
     if args.seed is not None:
         set_seed(args.seed)
 
+    _prepare_train_data_if_needed(args, accelerator)
+
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.output_dir is not None:
             os.makedirs(args.output_dir, exist_ok=True)
 
     # Load scheduler and models
-    teacher_model_path = args.teacher_model_name_or_path or args.pretrained_model_name_or_path
     noise_scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="scheduler"
     )
     noise_scheduler_tea = FlowMatchEulerDiscreteScheduler.from_pretrained(
-        teacher_model_path, subfolder="scheduler"
+        args.pretrained_model_name_or_path, subfolder="scheduler"
     )
     
     transformer = SD3Transformer2DModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="transformer", revision=args.revision, variant=args.variant
     )
     transformer_reg = SD3Transformer2DModel.from_pretrained(
-        teacher_model_path, subfolder="transformer", revision=args.revision, variant=args.variant
+        args.pretrained_model_name_or_path, subfolder="transformer", revision=args.revision, variant=args.variant
     )
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
@@ -619,7 +696,7 @@ def main(args):
     )
 
     # Dataset and DataLoaders creation:
-    train_dataset = Real_ESRGAN_Dataset(device=accelerator.device)
+    train_dataset = Real_ESRGAN_Dataset(root_dir_path=[args.train_data_dir], device=accelerator.device)
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=args.train_batch_size,
@@ -773,10 +850,10 @@ def main(args):
     autocast_ctx = torch.autocast(accelerator.device.type, dtype=weight_dtype)
     if args.use_default_prompt:
         prompt_default = "Cinematic, High Contrast, highly detailed, taken using a Canon EOS R camera, hyper detailed photo - realistic maximum detail, 32k, Color Grading, ultra HD, extrememeticulous detailing, skin pore detailing, hyper sharpness, perfect without deformations."
-        prompt_embeds_default = torch.load(os.path.join(args.default_embedding_dir, "prompt_embeds.pt") , map_location=accelerator.device).repeat(args.train_batch_size, 1, 1)
-        pooled_prompt_embeds_default = torch.load(os.path.join(args.default_embedding_dir, "pool_embeds.pt"), map_location=accelerator.device).repeat(args.train_batch_size, 1)
-    prompt_embeds_null = torch.load(os.path.join(args.null_embedding_dir, "prompt_embeds.pt"), map_location=accelerator.device).repeat(args.train_batch_size, 1, 1)
-    pooled_prompt_embeds_null = torch.load(os.path.join(args.null_embedding_dir, "pool_embeds.pt"), map_location=accelerator.device).repeat(args.train_batch_size, 1)
+        prompt_embeds_default = torch.load(os.path.join(args.default_embedding_dir, "prompt_embeds.pt") , map_location=accelerator.device, weights_only=False).repeat(args.train_batch_size, 1, 1)
+        pooled_prompt_embeds_default = torch.load(os.path.join(args.default_embedding_dir, "pool_embeds.pt"), map_location=accelerator.device, weights_only=False).repeat(args.train_batch_size, 1)
+    prompt_embeds_null = torch.load(os.path.join(args.null_embedding_dir, "prompt_embeds.pt"), map_location=accelerator.device, weights_only=False).repeat(args.train_batch_size, 1, 1)
+    pooled_prompt_embeds_null = torch.load(os.path.join(args.null_embedding_dir, "pool_embeds.pt"), map_location=accelerator.device, weights_only=False).repeat(args.train_batch_size, 1)
     
     for epoch in range(first_epoch, args.num_train_epochs):
         transformer.train()
@@ -990,7 +1067,7 @@ def main(args):
                 progress_bar.update(1)
                 global_step += 1
                 if accelerator.is_main_process:
-                    if global_step % args.checkpointing_steps == 500:
+                    if global_step % args.checkpointing_steps == 0:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)

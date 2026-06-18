@@ -7,18 +7,21 @@ from PIL import Image
 from torchvision import transforms
 
 # Paths to the datasets
-FLICKR2K_PATH = "/path/to/your/Flickr2K/datasets"  
-DIV2K_PATH = "/path/to/your/DIV2K/datasets"        
-LSDIR80K_PATH = "/path/to/your/LSDIR/datasets"    
-FFHQ10K_PATH = "/path/to/your/FFHQ/datasets"        
+DIV2K_PATH = os.path.join(os.path.dirname(__file__), "DIV2K", "train")
 
-data_path = [LSDIR80K_PATH, DIV2K_PATH, FFHQ10K_PATH, FLICKR2K_PATH]
+data_path = [DIV2K_PATH]
 lr_dir_name = "lr_bicubic"
 hr_dir_name = "gt"
 prompt_dir_name = "prompt_txt"
 prompt_embeds_dir_name = "prompt_embeds"
 pool_prompt_embeds_dir_name = "pool_embeds"
 hr_latnet_dir_name = "latent_hr"
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _sort_key(file_name):
+    stem = os.path.splitext(file_name)[0]
+    return (0, int(stem)) if stem.isdigit() else (1, stem)
 
 class Real_ESRGAN_Dataset(Dataset):
     def __init__(self,
@@ -46,6 +49,9 @@ class Real_ESRGAN_Dataset(Dataset):
         self.prompt_embeds_name = []
         self.pool_prompt_embeds_name = []
         
+        if isinstance(root_dir_path, (str, os.PathLike)):
+            root_dir_path = [root_dir_path]
+
         for root_dir in root_dir_path:
             # image data path
             lr_data_path = os.path.join(root_dir, self.lr_dir_name)
@@ -56,27 +62,39 @@ class Real_ESRGAN_Dataset(Dataset):
             self.prompt_embeds_path = os.path.join(root_dir, self.prompt_embeds_dir_name)
             self.pool_prompt_embeds_path = os.path.join(root_dir, self.pool_prompt_embeds_dir_name)
             
-            data_file = os.listdir(lr_data_path)
-            data_file.sort(key=lambda x: int(x.split(".")[0]))
+            data_file = [
+                file_name
+                for file_name in os.listdir(lr_data_path)
+                if os.path.splitext(file_name)[1].lower() in IMAGE_EXTENSIONS
+            ]
+            data_file.sort(key=_sort_key)
             
             self.lr_img_name = self.lr_img_name + [os.path.join(lr_data_path, file) for file in data_file]
             self.hr_img_name = self.hr_img_name + [os.path.join(hr_data_path, file) for file in data_file]
-            self.hr_latent_name = self.hr_latent_name + [os.path.join(latent_hr_path, file.replace(".png", ".pt")) for file in data_file]
+            self.hr_latent_name = self.hr_latent_name + [
+                os.path.join(latent_hr_path, f"{os.path.splitext(file)[0]}.pt") for file in data_file
+            ]
             
-            self.prompt_name = self.prompt_name + [os.path.join(self.prompt_path, file.replace(".png", ".txt")) for file in data_file]
-            self.prompt_embeds_name = self.prompt_embeds_name + [os.path.join(self.prompt_embeds_path, file.replace(".png", ".pt")) for file in data_file]
-            self.pool_prompt_embeds_name = self.pool_prompt_embeds_name + [os.path.join(self.pool_prompt_embeds_path, file.replace(".png", ".pt")) for file in data_file]
+            self.prompt_name = self.prompt_name + [
+                os.path.join(self.prompt_path, f"{os.path.splitext(file)[0]}.txt") for file in data_file
+            ]
+            self.prompt_embeds_name = self.prompt_embeds_name + [
+                os.path.join(self.prompt_embeds_path, f"{os.path.splitext(file)[0]}.pt") for file in data_file
+            ]
+            self.pool_prompt_embeds_name = self.pool_prompt_embeds_name + [
+                os.path.join(self.pool_prompt_embeds_path, f"{os.path.splitext(file)[0]}.pt") for file in data_file
+            ]
             
         self.img_nums = len(self.lr_img_name)
     
     def __getitem__(self, idx):
         lr_img = self.trans(Image.open(self.lr_img_name[idx]).convert("RGB")).squeeze() * 2 - 1 
         hr_img = self.trans(Image.open(self.hr_img_name[idx]).convert("RGB")).squeeze() * 2 - 1 
-        latent_hr = torch.load(self.hr_latent_name[idx], map_location=self.device).squeeze() 
+        latent_hr = torch.load(self.hr_latent_name[idx], map_location=self.device, weights_only=False).squeeze() 
         with open(self.prompt_name[idx], "r") as f:
             prompt = f.read()
-        prompt_embeds = torch.load(self.prompt_embeds_name[idx], map_location=self.device).squeeze()
-        pooled_prompt_embeds = torch.load(self.pool_prompt_embeds_name[idx], map_location=self.device).squeeze()
+        prompt_embeds = torch.load(self.prompt_embeds_name[idx], map_location=self.device, weights_only=False).squeeze()
+        pooled_prompt_embeds = torch.load(self.pool_prompt_embeds_name[idx], map_location=self.device, weights_only=False).squeeze()
             
         return {
             "lr_img": lr_img,

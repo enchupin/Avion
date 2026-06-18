@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 sys.path.append(os.getcwd())
 
@@ -14,31 +15,109 @@ from diffusers import AutoencoderKL
 from utils.model_family import DEFAULT_PROMPT, resolve_model_family
 
 
-FLICKR2K_PATH = "/path/to/your/Flickr2K/datasets"
-DIV2K_PATH = "/path/to/your/DIV2K/datasets"
-LSDIR80K_PATH = "/path/to/your/LSDIR/datasets"
-FFHQ10K_PATH = "/path/to/your/FFHQ/datasets"
+DIV2K_PATH = os.path.join(os.path.dirname(__file__), "DIV2K", "train")
 
-data_path = [LSDIR80K_PATH, DIV2K_PATH, FFHQ10K_PATH, FLICKR2K_PATH]
+data_path = [DIV2K_PATH]
 default_model_path = "/path/to/your/sd3_model"
 hr_dir_name = "gt"
 prompt_dir_name = "prompt_txt"
 prompt_embeds_dir_name = "prompt_embeds"
 pool_prompt_embeds_dir_name = "pool_embeds"
 hr_latnet_dir_name = "latent_hr"
+lr_dir_name = "lr_bicubic"
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _sort_key(path_or_name):
+    name = Path(path_or_name).name
+    stem = Path(name).stem
+    return (0, int(stem)) if stem.isdigit() else (1, stem)
+
+
+def _list_images(path):
+    path = Path(path)
+    if path.is_file():
+        if path.suffix.lower() not in IMAGE_EXTENSIONS:
+            raise ValueError(f"Unsupported image file: {path}")
+        return [path]
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not exist")
+    return sorted(
+        [file_path for file_path in path.rglob("*") if file_path.suffix.lower() in IMAGE_EXTENSIONS],
+        key=_sort_key,
+    )
 
 
 def merge_data(root_dirs, hr_name=hr_dir_name):
     hr_data_file_path = []
+    if isinstance(root_dirs, (str, os.PathLike)):
+        root_dirs = [root_dirs]
+
     for data_dir in root_dirs:
         if not os.path.exists(data_dir):
             raise FileNotFoundError(f"{data_dir} not exist")
 
         hr_data_dir = os.path.join(data_dir, hr_name)
-        hr_file = os.listdir(hr_data_dir)
-        hr_file.sort(key=lambda x: int(x.split(".")[0]))
+        hr_file = [
+            file_name
+            for file_name in os.listdir(hr_data_dir)
+            if os.path.splitext(file_name)[1].lower() in IMAGE_EXTENSIONS
+        ]
+        hr_file.sort(key=_sort_key)
         hr_data_file_path.extend(os.path.join(hr_data_dir, file_name) for file_name in hr_file)
     return hr_data_file_path
+
+
+def prepare_training_images(
+    raw_image_dir,
+    output_dir,
+    process_size=512,
+    downscale_factor=4,
+    prompt_text=DEFAULT_PROMPT,
+    overwrite=False,
+):
+    raw_images = _list_images(raw_image_dir)
+    if not raw_images:
+        raise FileNotFoundError(f"No supported images found in {raw_image_dir}")
+
+    output_dir = Path(output_dir)
+    gt_dir = output_dir / hr_dir_name
+    lr_dir = output_dir / lr_dir_name
+    prompt_dir = output_dir / prompt_dir_name
+    for directory in (gt_dir, lr_dir, prompt_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    lr_size = max(1, process_size // downscale_factor)
+    name_width = max(4, len(str(len(raw_images))))
+
+    for index, image_path in enumerate(raw_images, 1):
+        stem = f"{index:0{name_width}d}"
+        gt_path = gt_dir / f"{stem}.png"
+        lr_path = lr_dir / f"{stem}.png"
+        prompt_path = prompt_dir / f"{stem}.txt"
+
+        if not overwrite and gt_path.exists() and lr_path.exists() and prompt_path.exists():
+            continue
+
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+            width, height = image.size
+            crop_size = min(width, height, process_size)
+            left = (width - crop_size) // 2
+            top = (height - crop_size) // 2
+            hr_image = image.crop((left, top, left + crop_size, top + crop_size))
+            if crop_size != process_size:
+                hr_image = hr_image.resize((process_size, process_size), Image.Resampling.LANCZOS)
+
+            lr_image = hr_image.resize((lr_size, lr_size), Image.Resampling.BICUBIC)
+            lr_image = lr_image.resize((process_size, process_size), Image.Resampling.BICUBIC)
+
+            hr_image.save(gt_path)
+            lr_image.save(lr_path)
+
+        prompt_path.write_text(prompt_text.rstrip() + "\n", encoding="utf-8")
+
+    return str(output_dir)
 
 
 def _encode_prompt_with_t5(text_encoder, tokenizer, prompt=None, num_images_per_prompt=1, device=None):
@@ -185,10 +264,36 @@ def encode_prompt_for_family(text_encoders, tokenizers, prompt, model_family, de
 
 def run_encode_prompt(root_dirs, pretrained_model_name_or_path=default_model_path, device="cuda", model_family="auto"):
     model_family = resolve_model_family(pretrained_model_name_or_path, model_family)
+    if isinstance(root_dirs, (str, os.PathLike)):
+        root_dirs = [root_dirs]
     hr_data_file = merge_data(root_dirs)
     for data_dir in root_dirs:
         os.makedirs(os.path.join(data_dir, prompt_embeds_dir_name), exist_ok=True)
         os.makedirs(os.path.join(data_dir, pool_prompt_embeds_dir_name), exist_ok=True)
+
+    hr_data_file = [
+        hr_img_file
+        for hr_img_file in hr_data_file
+        if not (
+            os.path.exists(
+                os.path.join(
+                    os.path.dirname(os.path.dirname(hr_img_file)),
+                    prompt_embeds_dir_name,
+                    f"{os.path.splitext(os.path.basename(hr_img_file))[0]}.pt",
+                )
+            )
+            and os.path.exists(
+                os.path.join(
+                    os.path.dirname(os.path.dirname(hr_img_file)),
+                    pool_prompt_embeds_dir_name,
+                    f"{os.path.splitext(os.path.basename(hr_img_file))[0]}.pt",
+                )
+            )
+        )
+    ]
+    if not hr_data_file:
+        print("Prompt embedding cache is already complete.")
+        return
 
     tokenizers, text_encoders = import_text_encoders(
         pretrained_model_name_or_path=pretrained_model_name_or_path,
@@ -197,9 +302,13 @@ def run_encode_prompt(root_dirs, pretrained_model_name_or_path=default_model_pat
     )
 
     for hr_img_file in tqdm(hr_data_file, total=len(hr_data_file)):
-        prompt_file = hr_img_file.replace(".png", ".txt").replace(hr_dir_name, prompt_dir_name)
-        prompt_path = prompt_file.replace(".txt", ".pt").replace(prompt_dir_name, prompt_embeds_dir_name)
-        pool_path = prompt_file.replace(".txt", ".pt").replace(prompt_dir_name, pool_prompt_embeds_dir_name)
+        stem = os.path.splitext(os.path.basename(hr_img_file))[0]
+        data_dir = os.path.dirname(os.path.dirname(hr_img_file))
+        prompt_file = os.path.join(data_dir, prompt_dir_name, f"{stem}.txt")
+        prompt_path = os.path.join(data_dir, prompt_embeds_dir_name, f"{stem}.pt")
+        pool_path = os.path.join(data_dir, pool_prompt_embeds_dir_name, f"{stem}.pt")
+        if os.path.exists(prompt_path) and os.path.exists(pool_path):
+            continue
 
         with open(prompt_file, "r", encoding="utf-8") as file_obj:
             prompt = file_obj.read()
@@ -250,7 +359,11 @@ def vae_encode(hr_img_paths, hr_latent_path=hr_latnet_dir_name, model_path=defau
     vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae").to(device, weight_dtype)
     trans = transforms.ToTensor()
     for hr_img_file in tqdm(hr_img_paths, total=len(hr_img_paths)):
-        hr_save_path = hr_img_file.replace(".png", ".pt").replace(hr_dir_name, hr_latent_path)
+        stem = os.path.splitext(os.path.basename(hr_img_file))[0]
+        data_dir = os.path.dirname(os.path.dirname(hr_img_file))
+        hr_save_path = os.path.join(data_dir, hr_latent_path, f"{stem}.pt")
+        if os.path.exists(hr_save_path):
+            continue
         hr_img = Image.open(hr_img_file).convert("RGB")
         hq = trans(hr_img).unsqueeze(0).to(device, dtype=weight_dtype) * 2 - 1
         hq_latent = vae.encode(hq).latent_dist.sample() * vae.config.scaling_factor
@@ -262,9 +375,25 @@ def vae_encode(hr_img_paths, hr_latent_path=hr_latnet_dir_name, model_path=defau
 
 
 def run_vae_encode(root_dirs, pretrained_model_name_or_path=default_model_path, device="cuda"):
+    if isinstance(root_dirs, (str, os.PathLike)):
+        root_dirs = [root_dirs]
     hr_data_file = merge_data(root_dirs)
     for data_dir in root_dirs:
         os.makedirs(os.path.join(data_dir, hr_latnet_dir_name), exist_ok=True)
+    hr_data_file = [
+        hr_img_file
+        for hr_img_file in hr_data_file
+        if not os.path.exists(
+            os.path.join(
+                os.path.dirname(os.path.dirname(hr_img_file)),
+                hr_latnet_dir_name,
+                f"{os.path.splitext(os.path.basename(hr_img_file))[0]}.pt",
+            )
+        )
+    ]
+    if not hr_data_file:
+        print("HR latent cache is already complete.")
+        return
     vae_encode(hr_data_file, model_path=pretrained_model_name_or_path, device=device)
 
 
@@ -300,6 +429,35 @@ def parse_args():
         help="Skip prompt embedding preprocessing.",
     )
     parser.add_argument(
+        "--raw_image_dir",
+        type=str,
+        default=None,
+        help="Optional image file or directory to convert into a prepared training dataset.",
+    )
+    parser.add_argument(
+        "--train_data_dir",
+        type=str,
+        default=DIV2K_PATH,
+        help="Prepared training dataset directory.",
+    )
+    parser.add_argument(
+        "--process_size",
+        type=int,
+        default=512,
+        help="Square crop/resize size used when preparing raw images.",
+    )
+    parser.add_argument(
+        "--downscale_factor",
+        type=int,
+        default=4,
+        help="Bicubic degradation downscale factor used when preparing raw images.",
+    )
+    parser.add_argument(
+        "--overwrite_prepared_data",
+        action="store_true",
+        help="Overwrite existing prepared gt/lr/prompt files.",
+    )
+    parser.add_argument(
         "--output_embedding_dir",
         type=str,
         default=None,
@@ -316,6 +474,19 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    root_dirs = [args.train_data_dir]
+
+    if args.raw_image_dir is not None:
+        root_dirs = [
+            prepare_training_images(
+                args.raw_image_dir,
+                args.train_data_dir,
+                process_size=args.process_size,
+                downscale_factor=args.downscale_factor,
+                prompt_text=args.prompt_text,
+                overwrite=args.overwrite_prepared_data,
+            )
+        ]
 
     if args.output_embedding_dir is not None:
         save_single_prompt_embeddings(
@@ -327,10 +498,10 @@ if __name__ == "__main__":
         )
 
     if not args.skip_latents:
-        run_vae_encode(data_path, pretrained_model_name_or_path=args.pretrained_model_name_or_path, device=args.device)
+        run_vae_encode(root_dirs, pretrained_model_name_or_path=args.pretrained_model_name_or_path, device=args.device)
     if not args.skip_prompts:
         run_encode_prompt(
-            data_path,
+            root_dirs,
             pretrained_model_name_or_path=args.pretrained_model_name_or_path,
             device=args.device,
             model_family=args.model_family,

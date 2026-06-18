@@ -153,8 +153,8 @@ def load_prompt_embeddings(
         prompt_path = Path(embedding_dir) / "prompt_embeds.pt"
         pool_path = Path(embedding_dir) / "pool_embeds.pt"
         if prompt_path.exists() and pool_path.exists():
-            prompt_embeds = torch.load(prompt_path, map_location=device).to(dtype=dtype)
-            pooled_prompt_embeds = torch.load(pool_path, map_location=device).to(dtype=dtype)
+            prompt_embeds = torch.load(prompt_path, map_location=device, weights_only=False).to(dtype=dtype)
+            pooled_prompt_embeds = torch.load(pool_path, map_location=device, weights_only=False).to(dtype=dtype)
             return prompt_embeds, pooled_prompt_embeds
 
     return encode_prompt(prompt, pretrained_model_name_or_path, model_family, device, dtype)

@@ -24,12 +24,16 @@ Thumbs.db
 /SR/TSD-SR-main/.idea/
 /SR/TSD-SR-main/.venv/
 /SR/TSD-SR-main/checkpoint/
+/SR/TSD-SR-main/data/APEX/
+/SR/TSD-SR-main/data/APEX_*/
 /SR/TSD-SR-main/data/DIV2K/
 /SR/TSD-SR-main/dataset/
+/SR/TSD-SR-main/imgs/test/
 /SR/TSD-SR-main/StableSR_testsets/
 /SR/TSD-SR-main/logs/
 /SR/TSD-SR-main/outputs/
 /SR/TSD-SR-main/tmp/
+/SR/TSD-SR-main/wandb/
 /SR/TSD-SR-main/**/__pycache__/
 /SR/TSD-SR-main/**/*.py[cod]
 /SR/TSD-SR-main/**/*.safetensors

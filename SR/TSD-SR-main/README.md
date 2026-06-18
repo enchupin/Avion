@@ -192,13 +192,12 @@ your_training_datasets/ # Example: FLICKR2K/
 - Download the [teacher models](https://drive.google.com/file/d/1do8pfdm_oNUhJKxTlC_x7LqY7NlE0-Q7/view?usp=sharing) and put them in `checkpoint/teacher/`. 
 - Download the [null prompts embeddings](https://drive.google.com/drive/folders/1_kSod1CCq_xwdwDnLYUhr7iaT70eFPBD?usp=sharing) and put them in `dataset/null/`.
 
-We derive the teacher LoRA weights through fine-tuning of the pretrained SD3 model with HR data, optimizing via Diffusion loss. This is designed to enhance the teacher model's sensitivity to HQ data. Use `use_teacher_lora` to enable LoRA weights; otherwise, the T2I SD3 model will be used as the teacher model by default. If you want to swap the teacher base model, pass `--teacher_model_name_or_path`; when omitted, the script reuses `--pretrained_model_name_or_path` for both student and teacher. A practical candidate teacher swap is `stabilityai/stable-diffusion-3.5-medium`, but if you change the base model you should regenerate caches with `data/process.py`.
+We derive the teacher LoRA weights through fine-tuning of the pretrained SD3 model with HR data, optimizing via Diffusion loss. This is designed to enhance the teacher model's sensitivity to HQ data. Use `use_teacher_lora` to enable LoRA weights; otherwise, the T2I SD3 model will be used as the teacher model by default. The script uses `--pretrained_model_name_or_path` for both student and teacher.
 The null prompts embeddings are used to compute cfg when training. 
 
 #### Step 5: Run training command (or modify and execute `script/train.sh`):
 ```
 export MODEL_NAME="/path/to/your/sd3_model";
-export TEACHER_BASE_MODEL_NAME="stabilityai/stable-diffusion-3.5-medium";
 export TEACHER_MODEL_NAME="checkpoint/teacher/";
 export CHECKPOINT_PATH="checkpoint/tsdsr";
 export HF_ENDPOINT="https://hf-mirror.com";
@@ -207,17 +206,34 @@ export OUTPUT_LOG="logs/tsdsr.log";
 export LOG_NAME="tsdsr-train";
 nohup accelerate launch  --config_file config/config.yaml  --gpu_ids 0,1,2,3,4,5,6,7 --num_processes 8 --main_process_port 57079 --mixed_precision="fp16" train/train.py \
   --pretrained_model_name_or_path=$MODEL_NAME  \
-  --teacher_model_name_or_path=$TEACHER_BASE_MODEL_NAME \
   --teacher_lora_path=$TEACHER_MODEL_NAME \
-  --train_batch_size=2 --rank=64 --rank_vae=64 --rank_lora=64  \
-  --num_train_epochs=200 --checkpointing_steps=5000 --validation_steps=500  --max_train_steps=200000 \
-  --learning_rate=5e-06  --learning_rate_reg=1e-06 --lr_scheduler="cosine_with_restarts" --lr_warmup_steps=3000 \
+  --train_batch_size=1 --rank=64 --rank_vae=64 --rank_lora=64  \
+  --num_train_epochs=1 --checkpointing_steps=100 --validation_steps=100  --max_train_steps=300 \
+  --learning_rate=5e-06  --learning_rate_reg=1e-06 --lr_scheduler="cosine_with_restarts" --lr_warmup_steps=30 \
   --seed=43 --use_default_prompt --use_teacher_lora --use_random_bias \
   --output_dir=$OUTPUT_DIR \
   --report_to="wandb" --log_code --log_name=$LOG_NAME \
   --gradient_accumulation_steps=1 \
   --resume_from_checkpoint="latest" \
   --guidance_scale=7.5  > $OUTPUT_LOG 2>&1 & \
+```
+
+You can also train directly from an image file or image directory. The training script will prepare `gt`, `lr_bicubic`, `prompt_txt`, prompt embeddings, and HR latents before training starts:
+```
+powershell -ExecutionPolicy Bypass -File ./script/train-from-images.ps1 -ImagePath /path/to/images
+```
+
+Equivalent Python command:
+```
+python train/train.py \
+  --pretrained_model_name_or_path checkpoint/tsdsr \
+  --teacher_lora_path checkpoint/teacher/ \
+  --raw_train_image_dir /path/to/images \
+  --train_data_dir data/custom/train \
+  --default_embedding_dir dataset/default \
+  --null_embedding_dir dataset/null \
+  --train_batch_size=1 \
+  --use_default_prompt --use_teacher_lora --use_random_bias
 ```
 
 ## <a name="results"></a>🔎 Results

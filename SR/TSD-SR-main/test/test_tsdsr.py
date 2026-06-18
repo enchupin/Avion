@@ -34,6 +34,7 @@ DEFAULT_LORA_DIR = "checkpoint/tsdsr"
 PAPER_EVAL_LORA_DIR = "checkpoint/tsdsr-mse"
 DEFAULT_ALIGN_METHOD = "wavelet"
 PAPER_EVAL_ALIGN_METHOD = "adain"
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 SDXL_UNET_TARGET_MODULES = ["to_k", "to_q", "to_v", "to_out.0"]
 VAE_TARGET_MODULES = [
     "encoder.conv_in",
@@ -478,7 +479,11 @@ if __name__ == "__main__":
     latent_generator = build_latent_generator(args)
 
     if os.path.isdir(args.input_dir):
-        image_names = sorted(glob.glob(f"{args.input_dir}/*.png"))
+        image_names = sorted(
+            path
+            for path in glob.glob(os.path.join(args.input_dir, "*"))
+            if os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS
+        )
     else:
         image_names = [args.input_dir]
 
