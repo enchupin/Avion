@@ -39,7 +39,6 @@ if (-not (Test-Path $nativeHost)) {
 
 $pathsToRemove = @(
   (Join-Path $appDir ".idea"),
-  (Join-Path $appDir "extract-frames.bat"),
   (Join-Path $appDir "scripts"),
   (Join-Path $appDir "native\capture-host"),
   (Join-Path $appDir "node_modules"),

@@ -32,13 +32,8 @@ Enable `1 FPS PNG` before starting capture to save one lossless PNG per second i
 
 ## Extract Recorded Frames
 
-Install `ffmpeg` and run:
+Install `ffmpeg`, start the Electron app, then use `Frame Splitter` -> `Select Source`.
 
-```powershell
-cd electron
-npm run extract:frames -- -CapturePath "C:\Users\you\Videos\Avion Captures\avion-capture-20260522-120000.bgra"
-```
+For normal video files, Avion analyzes the source FPS and exports PNG frames at that rate.
 
-The script uses one output image per captured frame. Because the `.bgra` file is uncompressed, the extracted PNG frames preserve the captured pixel values without video compression loss.
-
-You can also double-click `electron\extract-frames.bat`. It automatically uses the newest raw capture or 1 FPS PNG folder in `Videos\Avion Captures`.
+For raw Avion `.bgra` captures, select the `.bgra`, `.csv`, or `.json` sidecar file. Avion uses the `.json` metadata for frame size and the `.csv` timing file for the per-frame timestamps, then exports one PNG per captured BGRA frame. The output folder includes a new `frames.csv` that maps each PNG back to its original capture timestamp.

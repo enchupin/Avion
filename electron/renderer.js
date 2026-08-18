@@ -3,9 +3,20 @@ const toggleLabel = document.getElementById('capture-toggle-label')
 const statusPill = document.getElementById('status-pill')
 const captureMessage = document.getElementById('capture-message')
 const oneFpsToggle = document.getElementById('one-fps-toggle')
+const videoExtractButton = document.getElementById('video-extract-button')
+const videoOpenOutputButton = document.getElementById('video-open-output-button')
+const videoStatusPill = document.getElementById('video-status-pill')
+const videoFpsValue = document.getElementById('video-fps-value')
+const videoFrameCount = document.getElementById('video-frame-count')
+const videoDuration = document.getElementById('video-duration')
+const videoSize = document.getElementById('video-size')
+const videoProgress = document.getElementById('video-progress')
+const videoMessage = document.getElementById('video-message')
 
 let isCaptureEnabled = false
 let isBusy = false
+let isVideoBusy = false
+let lastVideoOutputDir = null
 
 const statusCopy = {
   running: 'Running',
@@ -16,8 +27,42 @@ const statusCopy = {
   'missing-host': 'Build required'
 }
 
+const videoStatusCopy = {
+  idle: 'Idle',
+  analyzing: 'Analyzing',
+  extracting: 'Extracting',
+  completed: 'Complete',
+  failed: 'Failed',
+  cancelled: 'Idle'
+}
+
 function recordingPathMessage (path) {
   return path ? ` Saving to: ${path}` : ''
+}
+
+function formatNumber (value) {
+  return Number.isFinite(value) ? value.toLocaleString() : '--'
+}
+
+function formatFps (value) {
+  return Number.isFinite(value) ? value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : '--'
+}
+
+function formatDuration (seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '--'
+  }
+
+  const rounded = Math.round(seconds)
+  const hours = Math.floor(rounded / 3600)
+  const minutes = Math.floor((rounded % 3600) / 60)
+  const remainingSeconds = rounded % 60
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
 function renderToggleState (state = {}) {
@@ -50,6 +95,62 @@ function renderToggleState (state = {}) {
   }
 }
 
+function renderVideoFramesState (state = {}) {
+  const status = state.status ?? 'idle'
+  const metadata = state.metadata ?? null
+
+  if (state.outputDir) {
+    lastVideoOutputDir = state.outputDir
+  }
+
+  videoStatusPill.textContent = videoStatusCopy[status] ?? status
+  videoStatusPill.dataset.status = status
+  videoExtractButton.disabled = isVideoBusy
+  videoOpenOutputButton.hidden = !lastVideoOutputDir
+
+  if (metadata) {
+    videoFpsValue.textContent = metadata.variableFrameRate ? `Variable ${formatFps(metadata.fps)} avg` : formatFps(metadata.fps)
+    videoDuration.textContent = formatDuration(metadata.durationSeconds)
+    videoSize.textContent = metadata.width && metadata.height ? `${metadata.width}x${metadata.height}` : '--'
+    videoFrameCount.textContent = formatNumber(state.frameCount ?? metadata.estimatedFrameCount)
+  } else if (status === 'idle' || status === 'cancelled') {
+    videoFpsValue.textContent = '--'
+    videoFrameCount.textContent = '--'
+    videoDuration.textContent = '--'
+    videoSize.textContent = '--'
+  }
+
+  if (Number.isFinite(state.percent)) {
+    videoProgress.hidden = false
+    videoProgress.value = state.percent
+  } else if (status === 'idle' || status === 'cancelled') {
+    videoProgress.hidden = true
+    videoProgress.value = 0
+  }
+
+  if (state.message) {
+    videoMessage.textContent = state.message
+  } else if (status === 'analyzing') {
+    videoMessage.textContent = `Analyzing source: ${state.videoPath}`
+  } else if (status === 'extracting') {
+    const frameText = Number.isFinite(state.frame) ? ` Frame ${formatNumber(state.frame)}.` : ''
+    const timingText = metadata?.variableFrameRate ? ' Timing CSV will be preserved.' : ''
+    videoMessage.textContent = `Writing PNG frames to: ${state.outputDir}.${frameText}${timingText}`
+  } else if (status === 'completed') {
+    videoProgress.hidden = false
+    videoProgress.value = 100
+    videoFrameCount.textContent = formatNumber(state.frameCount)
+    const timingText = metadata?.variableFrameRate ? ' Timing saved to frames.csv.' : ''
+    videoMessage.textContent = `Saved ${formatNumber(state.frameCount)} PNG frames to: ${state.outputDir}.${timingText}`
+  } else if (status === 'cancelled') {
+    videoMessage.textContent = 'Ready'
+  } else if (status === 'failed') {
+    videoMessage.textContent = 'Frame extraction failed.'
+  } else {
+    videoMessage.textContent = 'Ready'
+  }
+}
+
 toggleButton.addEventListener('click', async () => {
   if (!window.captureControl || isBusy) {
     return
@@ -76,6 +177,44 @@ toggleButton.addEventListener('click', async () => {
   }
 })
 
+videoExtractButton.addEventListener('click', async () => {
+  if (!window.videoFrames || isVideoBusy) {
+    return
+  }
+
+  isVideoBusy = true
+  lastVideoOutputDir = null
+  renderVideoFramesState({ status: 'idle' })
+
+  try {
+    const state = await window.videoFrames.selectAndExtract()
+    renderVideoFramesState(state)
+  } catch (error) {
+    renderVideoFramesState({
+      status: 'failed',
+      message: error.message
+    })
+  } finally {
+    isVideoBusy = false
+    videoExtractButton.disabled = false
+    videoOpenOutputButton.hidden = !lastVideoOutputDir
+  }
+})
+
+videoOpenOutputButton.addEventListener('click', async () => {
+  if (!window.videoFrames || !lastVideoOutputDir) {
+    return
+  }
+
+  const result = await window.videoFrames.openOutput(lastVideoOutputDir)
+  if (!result.success && result.message) {
+    renderVideoFramesState({
+      status: 'failed',
+      message: result.message
+    })
+  }
+})
+
 async function initialize () {
   if (!window.captureControl) {
     renderToggleState({
@@ -88,6 +227,24 @@ async function initialize () {
 
   window.captureControl.onStatus(renderToggleState)
   renderToggleState(await window.captureControl.getStatus())
+
+  if (!window.videoFrames) {
+    renderVideoFramesState({
+      status: 'failed',
+      message: 'Video bridge is unavailable.'
+    })
+    return
+  }
+
+  window.videoFrames.onStatus((state) => {
+    if (state.status === 'analyzing' || state.status === 'extracting') {
+      isVideoBusy = true
+    } else if (state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled') {
+      isVideoBusy = false
+    }
+    renderVideoFramesState(state)
+  })
+  renderVideoFramesState()
 }
 
 initialize()

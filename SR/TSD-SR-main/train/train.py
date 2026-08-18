@@ -780,12 +780,16 @@ def main(args):
         else:
             # Get the mos recent checkpoint
             dirs = os.listdir(args.output_dir)
-            if "latest-checkpoint" in dirs:
+            numbered_checkpoints = [d for d in dirs if d.startswith("checkpoint-") and d.split("-")[1].isdigit()]
+            numbered_checkpoints = sorted(numbered_checkpoints, key=lambda x: int(x.split("-")[1]))
+            if numbered_checkpoints:
+                path = numbered_checkpoints[-1]
+            elif "checkpoint-latest" in dirs:
+                path = "checkpoint-latest"
+            elif "latest-checkpoint" in dirs:
                 path  = "latest-checkpoint"
             else:
-                dirs = [d for d in dirs if d.startswith("checkpoint")]
-                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-                path = dirs[-1] if len(dirs) > 0 else None
+                path = None
 
         if path is None:
             accelerator.print(
@@ -793,7 +797,7 @@ def main(args):
             )
             args.resume_from_checkpoint = None
             initial_global_step = 0
-        elif path == "latest-checkpoint":
+        elif path in ("checkpoint-latest", "latest-checkpoint"):
             accelerator.print(f"Resuming from checkpoint {path} and starting a new training run.")
             accelerator.load_state(os.path.join(args.output_dir, path))
             global_step = 0

@@ -10,40 +10,79 @@
   </head>
   <body>
     <main class="app">
-      <section class="control-panel" aria-label="Capture control">
-        <div class="capture-header">
-          <div>
-            <p class="eyebrow">Avion</p>
-            <h1>Game Capture</h1>
+      <div class="tool-grid">
+        <section class="control-panel" aria-label="Capture control">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Avion</p>
+              <h1>Game Capture</h1>
+            </div>
+            <div id="status-pill" class="status-pill">Idle</div>
           </div>
-          <div id="status-pill" class="status-pill">Idle</div>
-        </div>
 
-        <button id="capture-toggle" class="toggle-button" type="button" aria-pressed="false">
-          <span class="power-light" aria-hidden="true"></span>
-          <span id="capture-toggle-label">OFF</span>
-        </button>
+          <button id="capture-toggle" class="toggle-button" type="button" aria-pressed="false">
+            <span class="power-light" aria-hidden="true"></span>
+            <span id="capture-toggle-label">OFF</span>
+          </button>
 
-        <div class="capture-options">
-          <label class="option-toggle">
-            <input id="one-fps-toggle" type="checkbox">
-            <span>1 FPS PNG</span>
-          </label>
-        </div>
-
-        <div class="capture-meta">
-          <div>
-            <span class="meta-label">Source</span>
-            <strong>Primary display</strong>
+          <div class="capture-options">
+            <label class="option-toggle">
+              <input id="one-fps-toggle" type="checkbox">
+              <span>1 FPS PNG</span>
+            </label>
           </div>
-          <div>
-            <span class="meta-label">Engine</span>
-            <strong>C++ Windows Graphics Capture</strong>
-          </div>
-        </div>
 
-        <p id="capture-message" class="capture-message">Ready</p>
-      </section>
+          <div class="capture-meta">
+            <div>
+              <span class="meta-label">Source</span>
+              <strong>Primary display</strong>
+            </div>
+            <div>
+              <span class="meta-label">Engine</span>
+              <strong>C++ Windows Graphics Capture</strong>
+            </div>
+          </div>
+
+          <p id="capture-message" class="panel-message">Ready</p>
+        </section>
+
+        <section class="control-panel" aria-label="Frame extraction">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Frames</p>
+              <h2>Frame Splitter</h2>
+            </div>
+            <div id="video-status-pill" class="status-pill">Idle</div>
+          </div>
+
+          <div class="video-actions">
+            <button id="video-extract-button" class="action-button" type="button">Select Source</button>
+            <button id="video-open-output-button" class="action-button secondary" type="button" hidden>Open Folder</button>
+          </div>
+
+          <div class="capture-meta video-meta">
+            <div>
+              <span class="meta-label">FPS</span>
+              <strong id="video-fps-value">--</strong>
+            </div>
+            <div>
+              <span class="meta-label">Frames</span>
+              <strong id="video-frame-count">--</strong>
+            </div>
+            <div>
+              <span class="meta-label">Duration</span>
+              <strong id="video-duration">--</strong>
+            </div>
+            <div>
+              <span class="meta-label">Size</span>
+              <strong id="video-size">--</strong>
+            </div>
+          </div>
+
+          <progress id="video-progress" class="video-progress" max="100" value="0" hidden></progress>
+          <p id="video-message" class="panel-message">Ready</p>
+        </section>
+      </div>
     </main>
     <script src="./renderer.js"></script>
   </body>
