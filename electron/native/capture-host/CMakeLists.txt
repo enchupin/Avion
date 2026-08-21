@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 project(AvionCaptureHost LANGUAGES CXX)
 
 add_executable(AvionCaptureHost WIN32
-  src/main.cpp
+  src/capture.cpp
 )
 
 target_compile_features(AvionCaptureHost PRIVATE cxx_std_20)
