@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+
+*.mp4
+*.zip
+
+IMDN/training_data/
+IMDN/dataset/
+IMDN/apex/
