@@ -19,7 +19,7 @@ def run_upscale(weights_path, input_video_path, output_video_path):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out_sr = cv2.VideoWriter(output_video_path, fourcc, fps, (in_w * 4, in_h * 4))
     
-    print("Model inference started")
+    print("Model inference started...")
     
     with torch.no_grad():
         while cap.isOpened():
@@ -40,7 +40,6 @@ def run_upscale(weights_path, input_video_path, output_video_path):
     print(f"Upscaling completed. Saved to: {output_video_path}")
 
 if __name__ == "__main__":
-    # 경로 설정
     WEIGHTS = 'best_model.pth' # best_model.pth 위치
     INPUT = 'input.mp4'       # 입력 영상 경로
     OUTPUT = 'output.mp4'     # 출력 영상 경로
