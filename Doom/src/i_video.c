@@ -36,6 +36,7 @@
 #include "doomtype.h"
 #include "i_input.h"
 #include "i_joystick.h"
+#include "i_sr.h"
 #include "i_system.h"
 #include "i_timer.h"
 #include "i_video.h"
@@ -69,6 +70,15 @@ static SDL_Surface *screenbuffer = NULL;
 static SDL_Surface *argbbuffer = NULL;
 static SDL_Texture *texture = NULL;
 static SDL_Texture *texture_upscaled = NULL;
+static SDL_Texture *sr_texture = NULL;
+static SDL_Window *sr_screen = NULL;
+static SDL_Renderer *sr_renderer = NULL;
+static byte sr_input[SCREENWIDTH * SCREENHEIGHT * 4];
+static boolean sr_latency = false;
+static int sr_texture_width = 0;
+static int sr_texture_height = 0;
+static boolean sr_compare_mode = false;
+static int sr_window_title_mode = -1;
 
 static SDL_Rect blit_rect = {
     0,
@@ -247,6 +257,11 @@ static boolean MouseShouldBeGrabbed()
     }
 }
 
+static int LogicalScreenWidth(void)
+{
+    return SCREENWIDTH;
+}
+
 void I_SetGrabMouseCallback(grabmouse_callback_t func)
 {
     grabmouse_callback = func;
@@ -278,12 +293,21 @@ void I_ShutdownGraphics(void)
 
         SDL_FreeSurface(argbbuffer);
         SDL_FreeSurface(screenbuffer);
+        SDL_DestroyTexture(sr_texture);
+        SDL_DestroyRenderer(sr_renderer);
+        SDL_DestroyWindow(sr_screen);
+        sr_renderer = NULL;
+        sr_screen = NULL;
         SDL_DestroyTexture(texture_upscaled);
         SDL_DestroyTexture(texture);
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(screen);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
+        I_SR_Shutdown();
+        sr_texture = NULL;
+        sr_texture_width = 0;
+        sr_texture_height = 0;
         initialized = false;
     }
 }
@@ -303,17 +327,22 @@ void I_StartFrame (void)
 // ratio consistent with the aspect_ratio_correct variable.
 static void AdjustWindowSize(void)
 {
+    int logical_width;
+
+    logical_width = LogicalScreenWidth();
+
     if (aspect_ratio_correct || integer_scaling)
     {
-        if (window_width * actualheight <= window_height * SCREENWIDTH)
+        if (window_width * actualheight <= window_height * logical_width)
         {
             // We round up window_height if the ratio is not exact; this leaves
             // the result stable.
-            window_height = (window_width * actualheight + SCREENWIDTH - 1) / SCREENWIDTH;
+            window_height = (window_width * actualheight + logical_width - 1)
+                          / logical_width;
         }
         else
         {
-            window_width = window_height * SCREENWIDTH / actualheight;
+            window_width = window_height * logical_width / actualheight;
         }
     }
 }
@@ -465,6 +494,14 @@ void I_GetEvent(void)
                 break;
 
             case SDL_WINDOWEVENT:
+                if (sdlevent.window.event == SDL_WINDOWEVENT_CLOSE
+                 && (sdlevent.window.windowID == SDL_GetWindowID(screen)
+                  || (sr_screen != NULL && sdlevent.window.windowID == SDL_GetWindowID(sr_screen))))
+                {
+                    event_t event;
+                    event.type = ev_quit;
+                    D_PostEvent(&event);
+                }
                 if (sdlevent.window.windowID == SDL_GetWindowID(screen))
                 {
                     HandleWindowEvent(&sdlevent.window);
@@ -474,6 +511,13 @@ void I_GetEvent(void)
             default:
                 break;
         }
+    }
+    // Either game window may own keyboard/mouse focus; console focus releases
+    // the mouse grab so the latency output can be inspected.
+    if (sr_compare_mode)
+    {
+        SDL_Window *focused = SDL_GetKeyboardFocus();
+        window_focused = focused == screen || focused == sr_screen;
     }
 }
 
@@ -617,6 +661,8 @@ static void LimitTextureSize(int *w_upscale, int *h_upscale)
 static void CreateUpscaledTexture(boolean force)
 {
     int w, h;
+    int logical_width;
+    int pane_width;
     int h_upscale, w_upscale;
     static int h_upscale_old, w_upscale_old;
 
@@ -634,24 +680,28 @@ static void CreateUpscaledTexture(boolean force)
     // of the texture, the rendered area is scaled down to fit. Calculate
     // the actual dimensions of the rendered area.
 
-    if (w * actualheight < h * SCREENWIDTH)
+    logical_width = LogicalScreenWidth();
+
+    if (w * actualheight < h * logical_width)
     {
         // Tall window.
 
-        h = w * actualheight / SCREENWIDTH;
+        h = w * actualheight / logical_width;
     }
     else
     {
         // Wide window.
 
-        w = h * SCREENWIDTH / actualheight;
+        w = h * logical_width / actualheight;
     }
+
+    pane_width = w;
 
     // Pick texture size the next integer multiple of the screen dimensions.
     // If one screen dimension matches an integer multiple of the original
     // resolution, there is no need to overscale in this direction.
 
-    w_upscale = (w + SCREENWIDTH - 1) / SCREENWIDTH;
+    w_upscale = (pane_width + SCREENWIDTH - 1) / SCREENWIDTH;
     h_upscale = (h + SCREENHEIGHT - 1) / SCREENHEIGHT;
 
     // Minimum texture dimensions of 320x200.
@@ -698,6 +748,151 @@ static void CreateUpscaledTexture(boolean force)
     }
 }
 
+static boolean UpdateSRTexture(const byte *pixels, int w, int h, int pitch)
+{
+    if (pixels == NULL || w <= 0 || h <= 0 || pitch < w * 4)
+    {
+        return false;
+    }
+
+    if (sr_texture == NULL || sr_texture_width != w || sr_texture_height != h)
+    {
+        SDL_Texture *new_texture;
+
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+
+        new_texture = SDL_CreateTexture(sr_compare_mode ? sr_renderer : renderer,
+                                        SDL_PIXELFORMAT_ARGB8888,
+                                        SDL_TEXTUREACCESS_STREAMING,
+                                        w, h);
+
+        if (new_texture == NULL)
+        {
+            fprintf(stderr, "SR: failed to create output texture: %s\n",
+                    SDL_GetError());
+            return false;
+        }
+
+        if (sr_texture != NULL)
+        {
+            SDL_DestroyTexture(sr_texture);
+        }
+
+        sr_texture = new_texture;
+        sr_texture_width = w;
+        sr_texture_height = h;
+    }
+
+    if (SDL_UpdateTexture(sr_texture, NULL, pixels, pitch) != 0)
+    {
+        fprintf(stderr, "SR: failed to update output texture: %s\n",
+                SDL_GetError());
+        return false;
+    }
+
+    return true;
+}
+
+static void SetWindowTitleStatus(const char *status)
+{
+    char *buf;
+
+    if (screen == NULL)
+    {
+        return;
+    }
+
+    buf = M_StringJoin(window_title, " - ", PACKAGE_STRING, status, NULL);
+    SDL_SetWindowTitle(screen, buf);
+    free(buf);
+}
+
+static void UpdateSRWindowTitle(boolean sr_active)
+{
+    unsigned int flags = sr_active ? I_SR_GetLastFrameFlags() : 0;
+    int mode = !sr_active ? 0 : (flags & I_SR_FRAME_FLAG_MODEL) ? 1 : 2;
+    const char *status = mode == 1 ? "SR model" : mode == 2 ? "SR FALLBACK (not model)" : "SR unavailable";
+
+    if (mode == sr_window_title_mode)
+        return;
+    if (sr_compare_mode)
+    {
+        SetWindowTitleStatus(" [Original game]");
+        SDL_SetWindowTitle(sr_screen, status);
+    }
+    else
+        SetWindowTitleStatus(status);
+    sr_window_title_mode = mode;
+}
+
+
+static void RenderNormalFrame(const SDL_Rect *dest)
+{
+    if (smooth_pixel_scaling && !force_software_renderer)
+    {
+        // Render the base frame into the intermediate texture using nearest
+        // scaling, then let SDL linearly scale that result to the window.
+        SDL_SetRenderTarget(renderer, texture_upscaled);
+        SDL_RenderCopy(renderer, texture, NULL, NULL);
+
+        SDL_SetRenderTarget(renderer, NULL);
+        SDL_RenderCopy(renderer, texture_upscaled, NULL, dest);
+    }
+    else
+    {
+        SDL_SetRenderTarget(renderer, NULL);
+        SDL_RenderCopy(renderer, texture, NULL, dest);
+    }
+}
+
+static boolean RenderSRFrame(void)
+{
+    SDL_Renderer *target = sr_compare_mode ? sr_renderer : renderer;
+    return SDL_SetRenderTarget(target, NULL) == 0
+        && SDL_RenderCopy(target, sr_texture, NULL, NULL) == 0;
+}
+
+// Same-process monotonic timestamps include both pipe transfers, worker work,
+// texture upload and Present. Present return is not physical panel scanout.
+static void ReportSRLatency(Uint64 start, Uint64 sent, Uint64 received, Uint64 end)
+{
+    static Uint64 last_report;
+    static unsigned int count;
+    static double sum, maximum;
+    double tick_ms = 1000.0 / (double) SDL_GetPerformanceFrequency();
+    double total = (end - start) * tick_ms;
+    if (!sr_latency)
+        return;
+    ++count;
+    sum += total;
+    if (total > maximum)
+        maximum = total;
+    if (last_report == 0 || (end - last_report) * tick_ms >= 1000.0)
+    {
+        fprintf(stderr, "SR latency [%s] total=%.2f ms | prepare+original=%.2f | roundtrip+SR=%.2f | upload+present=%.2f | interval avg=%.2f max=%.2f n=%u\n",
+                (I_SR_GetLastFrameFlags() & I_SR_FRAME_FLAG_MODEL) ? "MODEL" : "FALLBACK",
+                total, (sent - start) * tick_ms, (received - sent) * tick_ms,
+                (end - received) * tick_ms, sum / count, maximum, count);
+        fflush(stderr);
+        last_report = end;
+        count = 0;
+        sum = maximum = 0;
+    }
+}
+
+static void SetBackgroundDrawColor(void)
+{
+    if (vga_porch_flash)
+    {
+        SDL_SetRenderDrawColor(renderer, palette[0].r, palette[0].g,
+                               palette[0].b, SDL_ALPHA_OPAQUE);
+    }
+    else
+    {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    }
+}
+
 //
 // I_FinishUpdate
 //
@@ -706,9 +901,23 @@ void I_FinishUpdate (void)
     static int lasttic;
     int tics;
     int i;
+    boolean sr_rendered;
+    boolean sr_active;
+    const byte *sr_pixels;
+    int sr_width;
+    int sr_height;
+    int sr_pitch;
+    Uint64 frame_start, sr_sent, sr_received;
 
     if (!initialized)
         return;
+
+    sr_rendered = false;
+    sr_active = false;
+    sr_pixels = NULL;
+    sr_width = 0;
+    sr_height = 0;
+    sr_pitch = 0;
 
     if (noblit)
         return;
@@ -787,37 +996,47 @@ void I_FinishUpdate (void)
     // 32-bit RGBA buffer and update the intermediate texture with the
     // contents of the RGBA buffer.
 
-    SDL_LockTexture(texture, &blit_rect, &argbbuffer->pixels,
-                    &argbbuffer->pitch);
+    frame_start = SDL_GetPerformanceCounter();
+    if (SDL_LockTexture(texture, &blit_rect, &argbbuffer->pixels,
+                        &argbbuffer->pitch) != 0)
+    {
+        V_RestoreDiskBackground();
+        return;
+    }
     SDL_LowerBlit(screenbuffer, &blit_rect, argbbuffer, &blit_rect);
+    // Locked texture memory is invalid after UnlockTexture. Keep our own copy
+    // so the original can be presented before waiting for the SR worker.
+    for (i = 0; i < SCREENHEIGHT; ++i)
+        memcpy(sr_input + i * SCREENWIDTH * 4,
+               (byte *) argbbuffer->pixels + i * argbbuffer->pitch, SCREENWIDTH * 4);
     SDL_UnlockTexture(texture);
 
-    // Make sure the pillarboxes are kept clear each frame.
-
+    SetBackgroundDrawColor();
     SDL_RenderClear(renderer);
-
-    if (smooth_pixel_scaling && !force_software_renderer)
+    if (sr_compare_mode)
     {
-        // Render this intermediate texture into the upscaled texture
-        // using "nearest" integer scaling.
-        SDL_SetRenderTarget(renderer, texture_upscaled);
-        SDL_RenderCopy(renderer, texture, NULL, NULL);
-
-        // Finally, render this upscaled texture to screen using linear scaling.
-
-        SDL_SetRenderTarget(renderer, NULL);
-        SDL_RenderCopy(renderer, texture_upscaled, NULL, NULL);
-    }
-    else
-    {
-        SDL_SetRenderTarget(renderer, NULL);
-        SDL_RenderCopy(renderer, texture, NULL, NULL);
+        RenderNormalFrame(NULL);
+        SDL_RenderPresent(renderer);
+        SDL_SetRenderDrawColor(sr_renderer, 0, 0, 0, 255);
+        SDL_RenderClear(sr_renderer);
     }
 
+    sr_sent = SDL_GetPerformanceCounter();
+    sr_rendered = I_SR_ProcessFrame(sr_input, SCREENWIDTH, SCREENHEIGHT,
+                                    SCREENWIDTH * 4, &sr_pixels,
+                                    &sr_width, &sr_height, &sr_pitch);
+    sr_received = SDL_GetPerformanceCounter();
+    sr_active = sr_rendered
+             && UpdateSRTexture(sr_pixels, sr_width, sr_height, sr_pitch);
+    if (sr_active)
+        sr_active = RenderSRFrame();
+    if (!sr_active && !sr_compare_mode)
+        RenderNormalFrame(NULL);
 
-    // Draw!
-
-    SDL_RenderPresent(renderer);
+    SDL_RenderPresent(sr_compare_mode ? sr_renderer : renderer);
+    if (sr_active)
+        ReportSRLatency(frame_start, sr_sent, sr_received, SDL_GetPerformanceCounter());
+    UpdateSRWindowTitle(sr_active);
 
     // Restore background and undo the disk indicator, if it was drawn.
     V_RestoreDiskBackground();
@@ -900,11 +1119,8 @@ void I_SetWindowTitle(const char *title)
 
 void I_InitWindowTitle(void)
 {
-    char *buf;
-
-    buf = M_StringJoin(window_title, " - ", PACKAGE_STRING, NULL);
-    SDL_SetWindowTitle(screen, buf);
-    free(buf);
+    SetWindowTitleStatus("");
+    sr_window_title_mode = 0;
 }
 
 void I_RegisterWindowIcon(const unsigned int *icon, int width, int height)
@@ -945,7 +1161,7 @@ static void SetScaleFactor(int factor)
         height = SCREENHEIGHT;
     }
 
-    window_width = factor * SCREENWIDTH;
+    window_width = factor * LogicalScreenWidth();
     window_height = factor * height;
     fullscreen = false;
 }
@@ -962,6 +1178,15 @@ void I_GraphicsCheckCommandLine(void)
     //
 
     noblit = M_CheckParm ("-noblit");
+
+    //!
+    // @category video
+    //
+    // Show the normal renderer and SR output in separate windows.
+    //
+
+    sr_compare_mode = M_ParmExists("-srcompare")
+                   || M_ParmExists("-sr-compare");
 
     //!
     // @category video 
@@ -1203,8 +1428,11 @@ static void SetVideoMode(void)
 {
     int w, h;
     int x, y;
+    int logical_width;
     int window_flags = 0, renderer_flags = 0;
     SDL_DisplayMode mode;
+
+    logical_width = LogicalScreenWidth();
 
     w = window_width;
     h = window_height;
@@ -1260,7 +1488,7 @@ static void SetVideoMode(void)
             SDL_GetError());
         }
 
-        SDL_SetWindowMinimumSize(screen, SCREENWIDTH, actualheight);
+        SDL_SetWindowMinimumSize(screen, logical_width, actualheight);
 
         I_InitWindowTitle();
         I_InitWindowIcon();
@@ -1288,12 +1516,22 @@ static void SetVideoMode(void)
         renderer_flags &= ~SDL_RENDERER_PRESENTVSYNC;
     }
 
+    if (sr_renderer != NULL)
+    {
+        SDL_DestroyRenderer(sr_renderer);
+        sr_renderer = NULL;
+        sr_texture = NULL;
+        sr_texture_width = sr_texture_height = 0;
+    }
     if (renderer != NULL)
     {
         SDL_DestroyRenderer(renderer);
         // all associated textures get destroyed
         texture = NULL;
         texture_upscaled = NULL;
+        sr_texture = NULL;
+        sr_texture_width = 0;
+        sr_texture_height = 0;
     }
 
     renderer = SDL_CreateRenderer(screen, -1, renderer_flags);
@@ -1321,6 +1559,49 @@ static void SetVideoMode(void)
                 SDL_GetError());
     }
 
+    if (sr_compare_mode)
+    {
+        if (sr_screen == NULL)
+        {
+            int sx, sy, sw, sh;
+            SDL_Rect bounds;
+            SDL_GetWindowPosition(screen, &sx, &sy);
+            SDL_GetWindowSize(screen, &sw, &sh);
+            // Keep both windows visible even if the saved size was a wide
+            // single-window comparison layout.
+            if (SDL_GetDisplayUsableBounds(video_display, &bounds) == 0)
+            {
+                sw = (bounds.w - 48) / 2;
+                sh = sw * actualheight / SCREENWIDTH;
+                if (sh > bounds.h - 100)
+                {
+                    sh = bounds.h - 100;
+                    sw = sh * SCREENWIDTH / actualheight;
+                }
+                if (sw < SCREENWIDTH) sw = SCREENWIDTH;
+                if (sh < actualheight) sh = actualheight;
+                sx = bounds.x + 12;
+                sy = bounds.y + 40;
+                SDL_SetWindowSize(screen, sw, sh);
+                SDL_SetWindowPosition(screen, sx, sy);
+            }
+            sr_screen = SDL_CreateWindow("SR starting...", sx + sw + 12, sy,
+                                         sw, sh, SDL_WINDOW_RESIZABLE);
+            if (sr_screen == NULL)
+                I_Error("Error creating SR window: %s", SDL_GetError());
+            SDL_SetWindowMinimumSize(sr_screen, SCREENWIDTH, actualheight);
+            SDL_RaiseWindow(screen);
+        }
+        sr_renderer = SDL_CreateRenderer(sr_screen, -1, renderer_flags);
+        if (sr_renderer == NULL)
+            sr_renderer = SDL_CreateRenderer(sr_screen, -1, SDL_RENDERER_SOFTWARE);
+        if (sr_renderer == NULL)
+            I_Error("Error creating SR renderer: %s", SDL_GetError());
+        SDL_RenderSetLogicalSize(sr_renderer, SCREENWIDTH, actualheight);
+        SDL_RenderSetIntegerScale(sr_renderer, integer_scaling);
+        sr_window_title_mode = -1;
+    }
+
     // Important: Set the "logical size" of the rendering context. At the same
     // time this also defines the aspect ratio that is preserved while scaling
     // and stretching the texture into the window.
@@ -1328,7 +1609,7 @@ static void SetVideoMode(void)
     if (aspect_ratio_correct || integer_scaling)
     {
         SDL_RenderSetLogicalSize(renderer,
-                                 SCREENWIDTH,
+                                 logical_width,
                                  actualheight);
     }
 
@@ -1509,6 +1790,19 @@ void I_InitGraphics(void)
     // Call I_ShutdownGraphics on quit
 
     I_AtExit(I_ShutdownGraphics, true);
+
+    sr_latency = sr_compare_mode || M_ParmExists("-srlatency");
+#ifdef _WIN32
+    if (sr_latency && !M_ParmExists("-srnoconsole") && AllocConsole())
+    {
+        FILE *console_stream;
+        freopen_s(&console_stream, "CONOUT$", "w", stderr);
+        SetConsoleTitleA("Avion SR latency (milliseconds)");
+    }
+#endif
+    if (sr_latency)
+        fprintf(stderr, "SR latency: source frame -> transfers + SR -> SDL_RenderPresent return. Not physical display scanout. First sample includes worker/model warmup.\n");
+    I_SR_Init();
 }
 
 // Bind all variables controlling video options into the configuration
