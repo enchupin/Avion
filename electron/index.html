@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
   <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
-    <meta http-equiv="X-Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+    <meta http-equiv="X-Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="./styles.css">
     <title>Avion Capture</title>
@@ -82,8 +82,65 @@
           <progress id="video-progress" class="video-progress" max="100" value="0" hidden></progress>
           <p id="video-message" class="panel-message">Ready</p>
         </section>
+        <section class="control-panel performance-panel" aria-label="성능 평가">
+          <div class="panel-header">
+            <div><p class="eyebrow">Performance Evaluation</p><h2>SR 성능 평가</h2></div>
+            <div id="benchmark-status" class="status-pill">대기</div>
+          </div>
+          <p class="benchmark-intro">같은 DOOM 장면으로 전체 프레임 SR과 오브젝트 ROI SR의 화질·처리 속도·GPU 사용률을 비교합니다.</p>
+          <div class="video-actions">
+            <button id="benchmark-record" type="button" class="action-button">DOOM 장면 수집</button>
+            <button id="benchmark-record-stop" type="button" class="action-button secondary" hidden>수집 종료·선택</button>
+            <button type="button" class="action-button secondary" data-source="roi">기존 DOOM ROI 데이터</button>
+          </div>
+          <p class="benchmark-caption">DOOM에서 이동하면 원본 프레임과 몬스터·아이템 영역을 함께 저장합니다. 최대 60장 수집 후 DOOM을 종료하고 동일 장면을 반복 측정합니다.</p>
+          <div class="video-actions benchmark-inputs">
+            <button type="button" class="action-button secondary" data-source="sample">Set5 샘플</button>
+            <button type="button" class="action-button secondary" data-source="folder">게임 프레임 폴더</button>
+            <button type="button" class="action-button secondary" data-source="capture">Avion 캡처</button>
+            <button type="button" class="action-button secondary" data-source="checkpoint">IMDN 가중치 선택</button>
+            <button type="button" class="action-button secondary" data-source="default-checkpoint">기본 가중치</button>
+          </div>
+          <p id="benchmark-source" class="panel-message">입력: Set5 샘플 · 가중치: 기본 IMDN</p>
+          <fieldset id="benchmark-settings" class="benchmark-settings">
+            <legend>측정 조건</legend>
+            <label>확대 배율<select id="benchmark-scale"><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
+            <label>실행 장치<select id="benchmark-device"><option value="auto">자동 선택</option><option value="cuda">CUDA GPU</option><option value="cpu">CPU</option></select></label>
+            <label>평가 모드<select id="benchmark-mode"><option value="reconstruction">축소·복원 (화질 + 속도)</option><option value="native">원본 입력 (속도 · 화질 N/A)</option></select></label>
+            <label>최대 기준 프레임 수<input id="benchmark-frames" type="number" value="5" min="1" max="100"></label>
+            <label>기준 영상 최대 변 (px)<input id="benchmark-edge" type="number" value="512" min="32" max="4096" step="16"></label>
+            <label>프레임별 최소 반복<input id="benchmark-repeats" type="number" value="10" min="1" max="100"></label>
+            <label class="option-toggle"><input id="benchmark-fp16" type="checkbox">FP16 추가 비교 (CUDA)</label>
+            <label class="option-toggle"><input id="benchmark-roi" type="checkbox" disabled>ROI SR 비교 (DOOM ROI 데이터 필요)</label>
+          </fieldset>
+          <div class="video-actions">
+            <button id="benchmark-start" type="button" class="action-button">성능 측정 시작</button>
+            <button id="benchmark-cancel" type="button" class="action-button secondary" hidden>취소</button>
+            <button type="button" class="action-button secondary" data-result="report" hidden>발표용 보고서</button>
+            <button type="button" class="action-button secondary" data-result="csv" hidden>결과 CSV</button>
+            <button type="button" class="action-button secondary" data-result="folder" hidden>결과 폴더</button>
+          </div>
+          <progress id="benchmark-progress" class="video-progress" max="100" value="0" hidden></progress>
+          <p id="benchmark-message" class="panel-message" role="status" aria-live="polite">측정을 시작하면 표와 그래프가 표시됩니다.</p>
+          <div id="benchmark-results" hidden>
+            <p id="benchmark-context" class="benchmark-context"></p>
+            <div class="benchmark-table-wrap"><table class="benchmark-table">
+              <caption>실측 결과 · CPU 보간과 GPU SR의 실행 장치는 다릅니다.</caption>
+              <thead><tr><th>방식</th><th>장치</th><th>전체 PSNR (dB)</th><th>전체 SSIM</th><th>ROI PSNR (dB)</th><th>ROI SSIM</th><th>평균 지연 (ms)</th><th>P95 (ms)</th><th>처리 FPS</th><th>GPU 전체 (%)</th></tr></thead>
+              <tbody id="benchmark-table-body"></tbody>
+            </table></div>
+            <p id="benchmark-execution" class="benchmark-caption"></p>
+            <div id="benchmark-charts" class="benchmark-charts"></div>
+            <h3>동일 프레임 비교</h3>
+            <p id="benchmark-preview-caption" class="benchmark-caption">동일한 입력으로 처리한 결과입니다. 녹색 경계는 패딩 전 오브젝트 영역이며 결과 이미지에는 포함되지 않습니다.</p>
+            <div id="benchmark-previews" class="benchmark-previews"></div>
+            <details class="benchmark-protocol"><summary>측정 조건과 수치 해석</summary><ul id="benchmark-notes"></ul></details>
+          </div>
+          <p class="benchmark-caption">지연·FPS는 프레임 변환 구간 기준이며 캡처·화면 표시 시간을 제외합니다. GPU는 카드 전체 사용량이고, 계측할 수 없는 값은 N/A로 표시합니다.</p>
+        </section>
       </div>
     </main>
     <script src="./renderer.js"></script>
+    <script src="./performance-renderer.js"></script>
   </body>
 </html>
