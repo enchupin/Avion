@@ -76,14 +76,18 @@ class ShortcutBlock(nn.Module):
 
 def mean_channels(F):
     assert(F.dim() == 4)
-    spatial_sum = F.sum(3, keepdim=True).sum(2, keepdim=True)
-    return spatial_sum / (F.size(2) * F.size(3))
+    # Spatial sums readily exceed FP16's range even when each activation is small.
+    # Keep reductions in FP32 for half-precision inference, preserving FP32 math.
+    values = F.float() if F.dtype in (torch.float16, torch.bfloat16) else F
+    spatial_sum = values.sum(3, keepdim=True).sum(2, keepdim=True)
+    return (spatial_sum / (F.size(2) * F.size(3))).to(dtype=F.dtype)
 
 def stdv_channels(F):
     assert(F.dim() == 4)
-    F_mean = mean_channels(F)
-    F_variance = (F - F_mean).pow(2).sum(3, keepdim=True).sum(2, keepdim=True) / (F.size(2) * F.size(3))
-    return F_variance.pow(0.5)
+    values = F.float() if F.dtype in (torch.float16, torch.bfloat16) else F
+    F_mean = mean_channels(values)
+    F_variance = (values - F_mean).pow(2).sum(3, keepdim=True).sum(2, keepdim=True) / (F.size(2) * F.size(3))
+    return F_variance.pow(0.5).to(dtype=F.dtype)
 
 def sequential(*args):
     if len(args) == 1:

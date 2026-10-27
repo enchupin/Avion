@@ -11,7 +11,8 @@
     "extract:frames": "powershell -ExecutionPolicy Bypass -File ./scripts/extract-video-frames.ps1",
     "package": "powershell -ExecutionPolicy Bypass -File ./scripts/package-app.ps1",
     "start": "electron .",
-    "test": "test"
+    "test": "node --test tests/*.test.js",
+    "test:sr": "python -B -m unittest discover -s ../SR -p test_*.py"
   },
   "devDependencies": {
     "@electron/packager": "^20.0.0",

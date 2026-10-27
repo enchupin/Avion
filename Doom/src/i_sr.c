@@ -18,6 +18,7 @@
 
 #include "doomtype.h"
 #include "i_sr.h"
+#include "i_video.h"
 #include "m_argv.h"
 #include "m_misc.h"
 
@@ -49,6 +50,57 @@ typedef struct
 } sr_state_t;
 
 static sr_state_t sr_state;
+static sr_roi_t roi_regions[64];
+static int roi_count;
+static boolean roi_overflow;
+
+boolean I_SR_ROIMode(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) enabled = M_ParmExists("-srroi");
+    return enabled;
+}
+
+void I_SR_ClearROIs(void)
+{
+    roi_count = 0;
+    roi_overflow = false;
+}
+
+void I_SR_AddROI(int x, int y, int w, int h)
+{
+    int right = x + w, bottom = y + h;
+    if (!I_SR_ROIMode() || roi_overflow) return;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (right > SCREENWIDTH) right = SCREENWIDTH;
+    if (bottom > SCREENHEIGHT) bottom = SCREENHEIGHT;
+    if (right <= x || bottom <= y) return;
+    if (roi_count == 64)
+    {
+        roi_count = 1;
+        roi_regions[0] = (sr_roi_t) {0, 0, SCREENWIDTH, SCREENHEIGHT};
+        roi_overflow = true;
+        return;
+    }
+    roi_regions[roi_count++] = (sr_roi_t) {x, y, right - x, bottom - y};
+}
+
+int I_SR_GetROIs(const sr_roi_t **regions)
+{
+    *regions = roi_regions;
+    return roi_count;
+}
+
+const char *I_SR_ModeLabel(void)
+{
+    unsigned int flags = sr_state.last_frame_flags;
+    if (flags & I_SR_FRAME_FLAG_BACKGROUND) return "background only";
+    if (flags & I_SR_FRAME_FLAG_FALLBACK) return "FALLBACK (not model)";
+    if (flags & I_SR_FRAME_FLAG_BUDGET) return "full model (ROI budget)";
+    if (flags & I_SR_FRAME_FLAG_ROI) return "ROI model";
+    return "full model";
+}
 
 static const char *GetEnvOrDefault(const char *name, const char *default_value)
 {
@@ -677,15 +729,16 @@ boolean I_SR_ProcessFrame(const void *pixels,
 
     input_bytes = (size_t) pitch * (size_t) height;
 
-    request_header[0] = SR_REQUEST_MAGIC;
+    request_header[0] = I_SR_ROIMode() ? 0x32525341u : SR_REQUEST_MAGIC;
     request_header[1] = (uint32_t) width;
     request_header[2] = (uint32_t) height;
     request_header[3] = (uint32_t) pitch;
     request_header[4] = SR_FORMAT_ARGB8888;
-    request_header[5] = 0;
+    request_header[5] = I_SR_ROIMode() ? roi_count : 0;
     request_header[6] = (uint32_t) input_bytes;
 
     if (!WriteExact(request_header, sizeof(request_header))
+     || (I_SR_ROIMode() && !WriteExact(roi_regions, roi_count * sizeof(sr_roi_t)))
      || !WriteExact(pixels, input_bytes)
      || !ReadExact(response_header, sizeof(response_header)))
     {
@@ -700,9 +753,11 @@ boolean I_SR_ProcessFrame(const void *pixels,
      || response_header[4] != SR_FORMAT_ARGB8888
      || response_header[1] == 0
      || response_header[2] == 0
+     || response_header[1] > SR_MAX_OUTPUT_BYTES / 4
      || response_header[3] < response_header[1] * 4
      || output_bytes == 0
-     || output_bytes > SR_MAX_OUTPUT_BYTES)
+     || output_bytes > SR_MAX_OUTPUT_BYTES
+     || (uint64_t) response_header[3] * response_header[2] != output_bytes)
     {
         fprintf(stderr, "SR: invalid worker response; disabling SR\n");
         I_SR_Shutdown();

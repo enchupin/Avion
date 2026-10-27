@@ -810,8 +810,8 @@ static void SetWindowTitleStatus(const char *status)
 static void UpdateSRWindowTitle(boolean sr_active)
 {
     unsigned int flags = sr_active ? I_SR_GetLastFrameFlags() : 0;
-    int mode = !sr_active ? 0 : (flags & I_SR_FRAME_FLAG_MODEL) ? 1 : 2;
-    const char *status = mode == 1 ? "SR model" : mode == 2 ? "SR FALLBACK (not model)" : "SR unavailable";
+    int mode = sr_active ? (int) flags : -2;
+    const char *status = sr_active ? I_SR_ModeLabel() : "SR unavailable";
 
     if (mode == sr_window_title_mode)
         return;
@@ -852,11 +852,31 @@ static boolean RenderSRFrame(void)
         && SDL_RenderCopy(target, sr_texture, NULL, NULL) == 0;
 }
 
+static void DrawROIDebug(void)
+{
+    const sr_roi_t *regions;
+    int i, n, w, h;
+    if (!I_SR_ROIMode() || !M_ParmExists("-srroi-debug")) return;
+    n = I_SR_GetROIs(&regions);
+    SDL_RenderGetLogicalSize(renderer, &w, &h);
+    if (!w || !h) SDL_GetRendererOutputSize(renderer, &w, &h);
+    SDL_SetRenderDrawColor(renderer, 0, 255, 80, 255);
+    for (i = 0; i < n; ++i)
+    {
+        SDL_Rect rect = {regions[i].x * w / SCREENWIDTH,
+                         regions[i].y * h / SCREENHEIGHT,
+                         regions[i].w * w / SCREENWIDTH,
+                         regions[i].h * h / SCREENHEIGHT};
+        SDL_RenderDrawRect(renderer, &rect);
+    }
+}
+
 // Same-process monotonic timestamps include both pipe transfers, worker work,
 // texture upload and Present. Present return is not physical panel scanout.
 static void ReportSRLatency(Uint64 start, Uint64 sent, Uint64 received, Uint64 end)
 {
     static Uint64 last_report;
+    static unsigned int last_flags;
     static unsigned int count;
     static double sum, maximum;
     double tick_ms = 1000.0 / (double) SDL_GetPerformanceFrequency();
@@ -867,14 +887,23 @@ static void ReportSRLatency(Uint64 start, Uint64 sent, Uint64 received, Uint64 e
     sum += total;
     if (total > maximum)
         maximum = total;
-    if (last_report == 0 || (end - last_report) * tick_ms >= 1000.0)
+    if (last_report == 0 || last_flags != I_SR_GetLastFrameFlags()
+     || (end - last_report) * tick_ms >= 1000.0)
     {
         fprintf(stderr, "SR latency [%s] total=%.2f ms | prepare+original=%.2f | roundtrip+SR=%.2f | upload+present=%.2f | interval avg=%.2f max=%.2f n=%u\n",
+                (I_SR_GetLastFrameFlags() & I_SR_FRAME_FLAG_BACKGROUND) ? "BACKGROUND" :
                 (I_SR_GetLastFrameFlags() & I_SR_FRAME_FLAG_MODEL) ? "MODEL" : "FALLBACK",
                 total, (sent - start) * tick_ms, (received - sent) * tick_ms,
                 (end - received) * tick_ms, sum / count, maximum, count);
         fflush(stderr);
+        if (I_SR_ROIMode())
+        {
+            const sr_roi_t *regions;
+            fprintf(stderr, "SR experiment: %s | raw regions=%d (before padding/merge)\n",
+                    I_SR_ModeLabel(), I_SR_GetROIs(&regions));
+        }
         last_report = end;
+        last_flags = I_SR_GetLastFrameFlags();
         count = 0;
         sum = maximum = 0;
     }
@@ -1016,6 +1045,7 @@ void I_FinishUpdate (void)
     if (sr_compare_mode)
     {
         RenderNormalFrame(NULL);
+        DrawROIDebug();
         SDL_RenderPresent(renderer);
         SDL_SetRenderDrawColor(sr_renderer, 0, 0, 0, 255);
         SDL_RenderClear(sr_renderer);

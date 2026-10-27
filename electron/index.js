@@ -2,6 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const { spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
+const { registerPerformance } = require('./performance')
 
 let captureEnabled = false
 let captureProcess = null
@@ -975,8 +976,9 @@ function stopCaptureHost () {
 
 function createWindow () {
   const win = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 920,
+    show: process.env.AVION_TEST_HEADLESS !== '1',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js')
     }
@@ -1056,6 +1058,7 @@ ipcMain.handle('video-frames:open-output', async (_event, outputDir) => {
 })
 
 app.whenReady().then(() => {
+  registerPerformance({ app, ipcMain, dialog, shell, BrowserWindow, windows })
   createWindow()
 })
 

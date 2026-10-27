@@ -28,6 +28,7 @@
 
 #include "i_swap.h"
 #include "i_system.h"
+#include "i_sr.h"
 #include "z_zone.h"
 #include "w_wad.h"
 
@@ -339,6 +340,8 @@ short*		mceilingclip;
 
 fixed_t		spryscale;
 fixed_t		sprtopscreen;
+static boolean sr_collect_sprite;
+static int sr_left, sr_top, sr_right, sr_bottom;
 
 void R_DrawMaskedColumn (column_t* column)
 {
@@ -365,6 +368,13 @@ void R_DrawMaskedColumn (column_t* column)
 
 	if (dc_yl <= dc_yh)
 	{
+            if (sr_collect_sprite)
+            {
+                if (dc_x < sr_left) sr_left = dc_x;
+                if (dc_x > sr_right) sr_right = dc_x;
+                if (dc_yl < sr_top) sr_top = dc_yl;
+                if (dc_yh > sr_bottom) sr_bottom = dc_yh;
+            }
 	    dc_source = (byte *)column + 3;
 	    dc_texturemid = basetexturemid - (column->topdelta<<FRACBITS);
 	    // dc_source = (byte *)column + 3 - column->topdelta;
@@ -939,7 +949,21 @@ void R_DrawSprite (vissprite_t* spr)
 		
     mfloorclip = clipbot;
     mceilingclip = cliptop;
+    // Only world monsters/pickups, never weapon sprites or masked walls.
+    // Bounds use columns after wall/floor clipping. Later sprites can still
+    // overdraw them: this is a conservative rectangle, not a visible mask.
+    sr_collect_sprite = I_SR_ROIMode()
+                     && (spr->mobjflags & (MF_COUNTKILL | MF_SPECIAL));
+    sr_left = SCREENWIDTH;
+    sr_top = SCREENHEIGHT;
+    sr_right = sr_bottom = -1;
     R_DrawVisSprite (spr, spr->x1, spr->x2);
+    if (sr_collect_sprite && sr_right >= sr_left && sr_bottom >= sr_top)
+        I_SR_AddROI(viewwindowx + (sr_left << detailshift),
+                    viewwindowy + sr_top,
+                    (sr_right - sr_left + 1) << detailshift,
+                    sr_bottom - sr_top + 1);
+    sr_collect_sprite = false;
 }
 
 
@@ -977,6 +1001,5 @@ void R_DrawMasked (void)
     if (!viewangleoffset)		
 	R_DrawPlayerSprites ();
 }
-
 
 

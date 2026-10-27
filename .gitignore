@@ -1,10 +1,15 @@
-# Node modules
-/electron/node_modules/
+# Reinstallable dependencies and machine-local environments
+node_modules/
+.venv/
+venv/
 
-# IDE settings
-/.idea/
+# IDE settings (including absolute paths specific to this computer)
+.idea/
+.vscode/
+.vs/
 
 # Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -12,13 +17,65 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+Desktop.ini
+~$*
+*.swp
+*.swo
+
+# Python caches and local test reports
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # Build outputs
 /dist/
 /build/
 *.exe
 /electron/dist/
-/electron/native/capture-host/build/
+/electron/native/capture-host/build*/
+/Doom/build*/
+/Doom/out/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.obj
+*.pdb
+*.ilk
+
+# Presentation files and private authoring/benchmark work
+*.ppt
+*.pptx
+*.pptm
+*.potx
+*.ppsx
+/*.pdf
+/.codex-*/
+/.codex_*/
+/.chart-data-*/
+
+# Generated reports, captures, frames and packaged deliverables
+/output/
+/captures/
+/recordings/
+/avion-capture-*/
+/electron/avion-capture-*/
+*.bgra
+avion-capture-*.csv
+avion-capture-*.json
+/SR/RFDN/output/
+/SR/RFDN/results/
+/SR/RFDN/output*.mp4
+
+# Keep IMDN sources, all checkpoints, datasets and existing outputs in Git.
+# Do not blanket-ignore model weights (*.pth/*.pt/*.onnx).
+
+# Duplicate download archive; extracted WADs and redistribution notices stay.
+/Doom/iwads/*.zip
 
 # TSD-SR local data, model weights, and generated files
 /SR/TSD-SR-main/.idea/
