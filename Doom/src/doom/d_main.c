@@ -74,6 +74,7 @@
 #include "statdump.h"
 
 #include "d_main.h"
+#include "i_sr.h"
 
 #include "doom_icon.c"
 
@@ -172,6 +173,7 @@ boolean D_Display (void)
     boolean			redrawsbar;
 		
     redrawsbar = false;
+    I_SR_ClearROIs();
     
     // change the view size if needed
     if (setsizeneeded)
@@ -284,6 +286,8 @@ boolean D_Display (void)
     M_Drawer ();          // menu is drawn even on top of everything
     NetUpdate ();         // send out any new accumulation
 
+    // Menus, help and wipes do not correspond to a clean world frame.
+    if (menuactive || inhelpscreens || wipe) I_SR_ClearROIs();
     return wipe;
 }
 
@@ -1999,4 +2003,3 @@ void D_DoomMain (void)
 
     D_DoomLoop ();  // never returns
 }
-
