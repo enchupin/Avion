@@ -77,7 +77,7 @@ def adjust_learning_rate(optimizer, epoch, step_size, lr_init, gamma):
 
 def load_state_dict(path):
 
-    state_dict = torch.load(path)
+    state_dict = torch.load(path, map_location='cpu')
     new_state_dcit = OrderedDict()
     for k, v in state_dict.items():
         if 'module' in k:

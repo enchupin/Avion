@@ -3,6 +3,7 @@ const { spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const { registerPerformance } = require('./performance')
+const { registerEnvironment } = require('./sr-environment')
 
 let captureEnabled = false
 let captureProcess = null
@@ -985,7 +986,7 @@ function createWindow () {
   })
   windows.add(win)
   win.on('closed', () => windows.delete(win))
-  win.loadFile('index.html')
+  win.loadFile(path.join(__dirname, 'index.html'))
 }
 
 ipcMain.handle('capture:set-enabled', (_event, enabled, options = {}) => {
@@ -1058,7 +1059,10 @@ ipcMain.handle('video-frames:open-output', async (_event, outputDir) => {
 })
 
 app.whenReady().then(() => {
-  registerPerformance({ app, ipcMain, dialog, shell, BrowserWindow, windows })
+  let performance
+  const environment = registerEnvironment({ app, ipcMain, windows,
+    isInUse: () => ['running', 'stopping', 'recording', 'recording-stop', 'playing'].includes(performance?.getState().status) })
+  performance = registerPerformance({ app, ipcMain, dialog, shell, BrowserWindow, windows, environment })
   createWindow()
 })
 

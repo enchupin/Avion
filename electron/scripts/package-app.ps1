@@ -1,7 +1,9 @@
+param([string]$OutputDirectory)
+
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$outputDir = Join-Path $root "dist"
+$outputDir = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root "dist" }
 $packageDir = Join-Path $outputDir "Avion-win32-x64"
 $appDir = Join-Path $packageDir "resources\app"
 $appExe = Join-Path $packageDir "Avion.exe"
@@ -9,16 +11,21 @@ $nativeHost = Join-Path $appDir "native\AvionCaptureHost.exe"
 
 Push-Location $root
 try {
-  & npx electron-packager . Avion `
+  $packagerCli = Join-Path $root "node_modules\@electron\packager\bin\electron-packager.mjs"
+  if (-not (Test-Path -LiteralPath $packagerCli)) {
+    throw "Electron packager is missing. Run npm install in electron first."
+  }
+  & node $packagerCli . Avion `
     --platform=win32 `
     --arch=x64 `
-    --out=dist `
+    --out="$outputDir" `
     --overwrite `
     --no-asar `
     --ignore="node_modules" `
     --ignore="dist" `
     --ignore="native[\\/]capture-host" `
     --ignore="scripts" `
+    --ignore="tests" `
     --ignore="package-lock\.json"
 
   if ($LASTEXITCODE -ne 0) {
@@ -47,12 +54,17 @@ $pathsToRemove = @(
 
 foreach ($pathToRemove in $pathsToRemove) {
   if (Test-Path $pathToRemove) {
-    Remove-Item -LiteralPath $pathToRemove -Recurse -Force
+    $resolvedTarget = (Resolve-Path -LiteralPath $pathToRemove).Path
+    $expectedRoot = [IO.Path]::GetFullPath($appDir).TrimEnd('\') + '\'
+    if (-not $resolvedTarget.StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing to remove a path outside the packaged app: $resolvedTarget"
+    }
+    Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
   }
 }
 
 # Ship the evaluation worker, architecture, sample images and existing weights.
-# Python/PyTorch remain an explicit runtime prerequisite.
+# The environment panel installs Python/PyTorch into writable user data on demand.
 $sourceSr = Join-Path (Split-Path -Parent $root) "SR"
 $bundledSr = Join-Path $packageDir "resources\SR"
 $evaluationFiles = @(
@@ -61,6 +73,7 @@ $evaluationFiles = @(
   "sr_worker.py",
   "IMDN\utils.py",
   "requirements-evaluation.txt",
+  "check_environment.py",
   "IMDN\model\architecture.py",
   "IMDN\model\block.py",
   "IMDN\checkpoints\IMDN_x2.pth",
@@ -95,6 +108,9 @@ if ((Test-Path -LiteralPath $doomExe) -and (Test-Path -LiteralPath (Join-Path $s
   New-Item -ItemType Directory -Path $doomBin -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $sourceDoom "COPYING.md") -Destination $bundledDoom -Force
   Copy-Item -LiteralPath (Join-Path $sourceDoom "AUTHORS") -Destination $bundledDoom -Force
+  foreach ($launcher in @('run-freedoom2.bat', 'run-freedoom2-roi.bat')) {
+    Copy-Item -LiteralPath (Join-Path $sourceDoom $launcher) -Destination $bundledDoom -Force
+  }
   Get-ChildItem -LiteralPath (Split-Path -Parent $doomExe) -File | Where-Object { $_.Extension -in '.exe', '.dll' } | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $doomBin -Force
   }

@@ -88,7 +88,26 @@
             <div id="benchmark-status" class="status-pill">대기</div>
           </div>
           <p class="benchmark-intro">같은 DOOM 장면으로 전체 프레임 SR과 오브젝트 ROI SR의 화질·처리 속도·GPU 사용률을 비교합니다.</p>
+          <section class="sr-environment" aria-labelledby="sr-environment-title">
+            <div class="panel-header">
+              <h3 id="sr-environment-title">SR 실행 환경</h3>
+              <button id="sr-check" type="button" class="action-button secondary">설치 여부 확인</button>
+            </div>
+            <p class="benchmark-caption">먼저 설치 여부를 확인한 뒤, 필요한 항목의 설치 버튼을 누르세요. 최초 설치에는 인터넷 연결이 필요합니다.</p>
+            <ul id="sr-components" class="sr-components" aria-label="환경 설치 상태"></ul>
+            <div id="sr-gpu" class="sr-gpu" role="status">GPU SR: 아직 확인하지 않았습니다.</div>
+            <p class="benchmark-caption">PyTorch 자동 설치는 CPU용입니다. GPU SR에는 지원 NVIDIA GPU·드라이버와 CUDA용 PyTorch가 필요합니다.</p>
+            <progress id="sr-progress" class="video-progress" hidden aria-label="환경 작업 진행률"></progress>
+            <p id="sr-message" class="panel-message" role="status" aria-live="polite">설치 여부 확인을 눌러 시작하세요.</p>
+            <button id="sr-cancel" type="button" class="action-button secondary" hidden>작업 취소</button>
+            <details class="benchmark-protocol"><summary>진단 내용과 설치 로그</summary>
+              <p id="sr-path" class="benchmark-caption"></p>
+              <pre id="sr-details" class="sr-log"></pre>
+              <pre id="sr-log" class="sr-log"></pre>
+            </details>
+          </section>
           <div class="video-actions">
+            <button id="benchmark-play" type="button" class="action-button" disabled>ROI 게임 실행</button>
             <button id="benchmark-record" type="button" class="action-button">DOOM 장면 수집</button>
             <button id="benchmark-record-stop" type="button" class="action-button secondary" hidden>수집 종료·선택</button>
             <button type="button" class="action-button secondary" data-source="roi">기존 DOOM ROI 데이터</button>
@@ -142,5 +161,6 @@
     </main>
     <script src="./renderer.js"></script>
     <script src="./performance-renderer.js"></script>
+    <script src="./environment-renderer.js"></script>
   </body>
 </html>

@@ -1,6 +1,7 @@
 # Reinstallable dependencies and machine-local environments
 node_modules/
 .venv/
+.avion-runtime/
 venv/
 
 # IDE settings (including absolute paths specific to this computer)
