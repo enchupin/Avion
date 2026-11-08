@@ -295,7 +295,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Avion live SR worker")
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--scale", type=int, default=2)
-    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default=os.environ.get("AVION_SR_DEVICE", "auto"))
     parser.add_argument(
         "--fallback",
         choices=["nearest", "bilinear", "bicubic"],

@@ -93,7 +93,9 @@ function renderBenchmarkState (state) {
   if (state.error) { showBenchmarkError(state); return }
   sourceDescription(state)
   const recording = ['recording', 'recording-stop'].includes(state.status)
-  benchmarkBusy = ['running', 'stopping'].includes(state.status) || recording
+  benchmarkBusy = ['running', 'stopping', 'playing'].includes(state.status) || recording
+  benchmarkElement('play').disabled = benchmarkBusy
+  benchmarkElement('play').textContent = state.status === 'playing' ? 'ROI 게임 실행 중' : 'ROI 게임 실행'
   benchmarkElement('start').disabled = benchmarkBusy
   benchmarkElement('settings').disabled = benchmarkBusy
   document.querySelectorAll('[data-source]').forEach(button => { button.disabled = benchmarkBusy })
@@ -101,11 +103,11 @@ function renderBenchmarkState (state) {
   benchmarkElement('record-stop').hidden = !recording
   benchmarkElement('record-stop').disabled = state.status === 'recording-stop'
   benchmarkElement('roi').disabled = !benchmarkRoiAvailable
-  benchmarkElement('cancel').hidden = !benchmarkBusy || recording
+  benchmarkElement('cancel').hidden = !['running', 'stopping'].includes(state.status)
   benchmarkElement('cancel').disabled = state.status === 'stopping'
-  benchmarkElement('progress').hidden = !benchmarkBusy || recording
+  benchmarkElement('progress').hidden = !['running', 'stopping'].includes(state.status)
   benchmarkElement('progress').value = state.progress || 0
-  const labels = { idle: '대기', running: '측정 중', stopping: '중단 중', recording: 'DOOM 수집 중', 'recording-stop': '수집 종료 중', completed: '측정 완료', failed: '실패', cancelled: '취소됨' }
+  const labels = { idle: '대기', playing: 'ROI 게임 실행 중', running: '측정 중', stopping: '중단 중', recording: 'DOOM 수집 중', 'recording-stop': '수집 종료 중', completed: '측정 완료', failed: '실패', cancelled: '취소됨' }
   benchmarkElement('status').textContent = labels[state.status] || '대기'
   benchmarkElement('status').dataset.status = state.status
   benchmarkElement('message').textContent = state.message || ''
@@ -145,6 +147,9 @@ benchmarkElement('cancel').addEventListener('click', async () => {
 })
 benchmarkElement('record').addEventListener('click', async () => {
   try { renderBenchmarkState(await performanceBridge.record()) } catch (error) { showBenchmarkError(error) }
+})
+benchmarkElement('play').addEventListener('click', async () => {
+  try { renderBenchmarkState(await performanceBridge.play()) } catch (error) { showBenchmarkError(error) }
 })
 benchmarkElement('record-stop').addEventListener('click', async () => {
   try { renderBenchmarkState(await performanceBridge.stopRecording()) } catch (error) { showBenchmarkError(error) }

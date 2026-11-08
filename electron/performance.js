@@ -2,6 +2,7 @@ const { spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const { randomUUID } = require('crypto')
+const { launchRoiGame } = require('./doom-launcher')
 
 function validateOptions (options = {}) {
   const integer = (key, fallback, min, max) => {
@@ -21,7 +22,7 @@ function validateOptions (options = {}) {
     repeats: integer('repeats', 10, 1, 100) }
 }
 
-function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, windows }) {
+function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, windows, environment }) {
   const srRoot = app.isPackaged ? path.join(process.resourcesPath, 'SR') : path.resolve(__dirname, '..', 'SR')
   const outputRoot = process.env.AVION_BENCHMARK_OUTPUT || (app.isPackaged
     ? path.join(app.getPath('documents'), 'Avion Benchmarks')
@@ -30,6 +31,7 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
   let selectedCheckpoint = null
   let child = null
   let doom = null
+  let roiGame = null
   let recordingTimer = null
   let cancelRequested = false
   let latestDir = null
@@ -58,7 +60,34 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
     if (process.platform === 'win32' && processToStop.pid) {
       const killer = spawn('taskkill', ['/PID', String(processToStop.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
       killer.on('error', () => processToStop.kill())
+      return killer
     } else processToStop.kill('SIGINT')
+  }
+
+  function play () {
+    if (process.platform !== 'win32') throw new Error('ROI 게임 실행은 Windows에서 지원합니다.')
+    if (child || doom || roiGame) throw new Error('실행 중인 게임, 측정 또는 장면 수집을 먼저 종료하세요.')
+    const python = environment.requirePython()
+    const game = launchRoiGame({
+      gameRoot: app.isPackaged ? path.join(process.resourcesPath, 'Doom') : path.resolve(__dirname, '..', 'Doom'),
+      srRoot, python, cuda: environment.getState().report?.cuda,
+      configDir: path.join(app.getPath('userData'), 'doom-play')
+    })
+    roiGame = game
+    let failure = null
+    let output = ''
+    for (const stream of [game.stdout, game.stderr]) {
+      stream.setEncoding('utf8')
+      stream.on('data', data => { output = (output + data).slice(-3000) })
+    }
+    game.on('error', error => { failure = error.message })
+    game.on('close', code => {
+      if (roiGame !== game) return
+      roiGame = null
+      broadcast({ status: failure || code !== 0 ? 'failed' : 'idle',
+        message: failure || (code !== 0 ? `ROI 게임 실행 실패 (${code}): ${output.trim()}` : 'ROI 게임을 종료했습니다.') })
+    })
+    return broadcast({ status: 'playing', message: 'ROI 게임 실행 중 · 원본과 SR 비교 창이 열립니다. 게임 창에서 종료할 수 있습니다.' })
   }
 
   function stopRecording () {
@@ -70,11 +99,15 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
   }
 
   function startRecording () {
-    if (child || doom) throw new Error('현재 측정 또는 장면 수집을 종료하세요.')
+    if (child || doom || roiGame) throw new Error('현재 게임, 측정 또는 장면 수집을 종료하세요.')
+    const python = environment.requirePython()
     const gameRoot = app.isPackaged ? path.join(process.resourcesPath, 'Doom') : path.resolve(__dirname, '..', 'Doom')
-    const exe = path.join(gameRoot, 'build-local', 'src', 'Release', 'chocolate-doom.exe')
+    const exe = [
+      path.join(gameRoot, 'build-local', 'src', 'Release', 'chocolate-doom.exe'),
+      path.join(gameRoot, 'runtime', 'win-x64', 'chocolate-doom.exe')
+    ].find(candidate => fs.existsSync(candidate))
     const iwad = path.join(gameRoot, 'iwads', 'freedoom-0.13.0', 'freedoom-0.13.0', 'freedoom2.wad')
-    if (!fs.existsSync(exe) || !fs.existsSync(iwad)) throw new Error('ROI 지원 DOOM 실행 파일 또는 Freedoom2 WAD가 없습니다. README의 DOOM 빌드·설치 절차를 먼저 진행하세요.')
+    if (!exe || !fs.existsSync(iwad)) throw new Error('ROI 지원 DOOM 실행 파일 또는 Freedoom2 WAD가 없습니다. Doom/runtime과 Doom/iwads를 포함한 전체 저장소를 내려받으세요. 자세한 내용은 Doom/README.md를 확인하세요.')
     fs.mkdirSync(outputRoot, { recursive: true })
     const directory = path.join(outputRoot, `doom-scenes-${Date.now()}-${randomUUID().slice(0, 8)}`)
     let stderr = ''
@@ -82,7 +115,8 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
     const game = spawn(exe, ['-window', '-srroi', '-srcompare', '-srlatency', '-srnoconsole', '-nograbmouse', '-warp', '1', '-skill', '3', '-iwad', iwad,
       '-config', directory + '.cfg', '-extraconfig', directory + '-extra.cfg'], {
       cwd: path.dirname(exe), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'],
-      env: { ...process.env, AVION_SR: '1', AVION_SR_WORKER: path.join(srRoot, 'sr_worker.py'),
+      env: { ...process.env, AVION_SR: '1', AVION_SR_PYTHON: python, AVION_SR_WORKER: path.join(srRoot, 'sr_worker.py'),
+        AVION_SR_DEVICE: environment.getState().report?.cuda ? 'auto' : 'cpu',
         AVION_SR_CHECKPOINT: path.join(srRoot, 'IMDN', 'checkpoints', 'IMDN_x2.pth'), AVION_SR_SCALE: '2',
         AVION_ROI_RECORD_DIR: directory, AVION_ROI_RECORD_INTERVAL_MS: '500', AVION_ROI_RECORD_MAX_FRAMES: '60',
         PYTHONUTF8: '1', PYTHONDONTWRITEBYTECODE: '1' }
@@ -149,9 +183,13 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
   }
 
   function start (input) {
+    if (roiGame) throw new Error('정확한 성능 측정을 위해 ROI 게임을 먼저 종료하세요.')
     if (doom) throw new Error('GPU 측정 간섭을 막기 위해 DOOM 장면 수집을 먼저 종료하세요.')
     if (child) return { ...state, message: '평가가 이미 실행 중입니다.' }
+    const python = environment.requirePython()
     const options = validateOptions(input)
+    if ((options.device === 'cuda' || options.fp16) && !environment.getState().report?.cuda) throw new Error('현재 GPU SR을 사용할 수 없습니다. SR 실행 환경의 GPU 진단을 확인하세요.')
+    if (options.device === 'auto' && !environment.getState().report?.cuda) options.device = 'cpu'
     if (options.roi && !sourceInfo().roiAvailable) throw new Error('DOOM 장면을 수집하거나 기존 ROI 데이터를 선택하세요.')
     const script = path.join(srRoot, 'benchmark.py')
     if (!fs.existsSync(script)) throw new Error('SR/benchmark.py를 찾을 수 없습니다.')
@@ -166,7 +204,6 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
       '--repeats', String(options.repeats), '--mode', options.mode, '--methods', ...methods]
     if (selectedSource) args.push('--source', selectedSource)
     if (selectedCheckpoint) args.push('--checkpoint', selectedCheckpoint)
-    const python = process.env.AVION_SR_PYTHON || 'python'
     let buffer = ''
     let stderr = ''
     let completed = false
@@ -242,7 +279,7 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
   }
 
   async function select (event, type) {
-    if (child || doom) throw new Error('평가 또는 장면 수집 종료 후 입력을 변경하세요.')
+    if (child || doom || roiGame) throw new Error('게임, 평가 또는 장면 수집 종료 후 입력을 변경하세요.')
     if (type === 'sample') {
       selectedSource = null
       return broadcast(sourceInfo())
@@ -271,6 +308,7 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
     try { return await handler(...args) } catch (error) { return { error: error.message } }
   }
   ipcMain.handle('performance:get-state', guarded(() => ({ ...state, ...sourceInfo() })))
+  ipcMain.handle('performance:play', guarded(play))
   ipcMain.handle('performance:record', guarded(() => startRecording()))
   ipcMain.handle('performance:record-stop', guarded(() => stopRecording()))
   ipcMain.handle('performance:select', guarded(select))
@@ -286,6 +324,17 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
   }))
   app.on('before-quit', stop)
   app.on('before-quit', stopRecording)
+  let quittingGame = false
+  app.on('before-quit', event => {
+    if (!roiGame || quittingGame) return
+    // Keep the cmd parent alive until taskkill has enumerated its descendants.
+    // Exiting Electron first can orphan the game launched by START /WAIT.
+    event.preventDefault()
+    quittingGame = true
+    const killer = terminate(roiGame)
+    if (killer) killer.once('close', () => app.quit())
+    else app.quit()
+  })
   return { start, stop, startRecording, stopRecording, getState: () => state }
 }
 

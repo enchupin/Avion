@@ -11,6 +11,10 @@ Electron control surface with a native C++ Windows Graphics Capture preview host
 
 ## Run
 
+Windows 배포본은 [GitHub Releases](https://github.com/enchupin/Avion/releases)에서 `Avion-v1.0.2-win-x64.zip`을 내려받아 압축을 푼 뒤 `Avion-win32-x64/Avion.exe`를 더블클릭합니다. 실행 파일 옆의 DLL과 `resources` 폴더를 함께 유지하세요. Node.js나 Visual Studio 설치 없이 실행할 수 있으며, SR은 앱의 **설치 여부 확인 → 미설치 항목 설치**로 준비합니다. 자동 PyTorch 설치는 CPU용입니다.
+
+소스에서 실행하는 경우:
+
 ```powershell
 cd electron
 npm install
@@ -42,7 +46,13 @@ For raw Avion `.bgra` captures, select the `.bgra`, `.csv`, or `.json` sidecar f
 
 앱 하단 **SR 성능 평가 → 성능 측정 시작**을 누르면 저장소의 Set5 이미지와 IMDN 가중치로 실제 평가를 실행합니다. 게임 프레임 폴더 또는 기존 Avion BGRA 캡처도 선택할 수 있습니다. 같은 프레임을 Nearest, Bilinear, Bicubic, IMDN FP32로 처리하며, CUDA에서는 IMDN FP16 비교를 추가할 수 있습니다. 기본 가중치는 ×2/×3/×4 배율에 맞춰 선택합니다. 사용자 가중치는 해당 배율의 IMDN 구조와 일치해야 합니다.
 
-Python 실행 환경에 평가 의존성을 설치하세요. CUDA 버전의 PyTorch가 필요한 환경은 [PyTorch 설치 안내](https://pytorch.org/get-started/locally/)를 따릅니다.
+**SR 성능 평가 → SR 실행 환경 → 설치 여부 확인**을 먼저 누르세요. Python, NumPy, OpenCV, scikit-image, PyTorch의 설치 상태와 버전을 표시합니다. 미설치 또는 실행 불가 항목에만 **설치** 버튼이 나타납니다. Python이 없다면 Python부터 설치하고 나머지 패키지를 설치하세요. 설치 중에는 진행 상태·로그·취소 버튼이 표시되며, 완료 후 자동으로 재검사합니다. IMDN ×2/×3/×4와 ROI 추론까지 통과하면 DOOM 수집과 측정 버튼이 활성화됩니다.
+
+Windows x64에서는 기존 Python이 없어도 공식 CPython NuGet 패키지를 다운로드해 SHA-256을 검증하고 앱 전용 환경을 만듭니다. 개발 실행은 저장소의 `.avion-runtime/`, 배포 앱은 사용자 데이터 폴더의 `sr-runtime/`에 설치하므로 앱 설치 폴더의 쓰기 권한이나 시스템 Python 설정 변경이 필요하지 않습니다. 기존 프로젝트 `.venv`도 인식합니다. 설치된 환경은 다음 실행에도 사용하며, 앱을 다시 열면 **설치 여부 확인**으로 점검하세요. 다른 PC에는 가상환경 폴더를 복사하지 말고 같은 버튼으로 설치하세요. 최초 설치에는 인터넷 연결과 패키지 저장 공간이 필요합니다. 네트워크 오류는 로그를 확인한 뒤 해당 설치 버튼으로 재시도할 수 있습니다.
+
+**GPU SR**은 CUDA 장치 인식뿐 아니라 GPU 합성곱과 실제 IMDN 추론도 확인합니다. CPU용 PyTorch, GPU/드라이버 인식 실패, 추론 오류를 구분해 표시합니다. GPU 검증이 안 된 상태에서는 CPU로 실행하며 CUDA/FP16 선택을 비활성화합니다. 자동 설치 버튼은 CPU용 PyTorch를 설치합니다. CUDA용 PyTorch 설치는 [PyTorch 설치 안내](https://pytorch.org/get-started/locally/)에서 GPU·드라이버에 맞는 명령을 선택해 진단에 표시된 Python 경로로 실행한 뒤 다시 확인하세요.
+
+터미널에서 직접 설정하는 경우:
 
 ```powershell
 python -m pip install -r SR/requirements-evaluation.txt
@@ -72,6 +82,8 @@ GPU 값은 `nvidia-smi`의 카드 전체 사용률과 메모리를 약 100 ms �
 IMDN FP16 비교는 합성곱을 FP16으로 실행하고 채널 평균·분산의 누적 합은 FP32로 계산해 오버플로를 방지합니다. 워밍업과 화질 계산에서는 출력의 NaN/Infinity를 검사하며, 비정상 출력이 있으면 보고서를 완료하지 않습니다.
 
 ### 같은 DOOM 장면으로 전체 SR / ROI SR 비교
+
+게임을 바로 실행하려면 **SR 실행 환경 → 설치 여부 확인** 후 **ROI 게임 실행**을 누르세요. `Doom/run-freedoom2-roi.bat`를 확인된 Python 환경으로 실행해 원본·ROI SR 비교 창을 엽니다. 게임 중에는 중복 실행, 환경 설치, 성능 측정을 막으며 게임을 종료하면 다시 사용할 수 있습니다. 장면을 저장하려면 별도의 **DOOM 장면 수집**을 사용하세요. Electron을 닫으면 이 버튼으로 시작한 게임도 종료됩니다.
 
 1. **SR 성능 평가 → DOOM 장면 수집**을 누릅니다. 기존 ROI 지원 `Doom/build-local/src/Release/chocolate-doom.exe`와 `Doom/iwads/freedoom-0.13.0/freedoom-0.13.0/freedoom2.wad`를 사용합니다. 실행 파일이 없으면 [DOOM 빌드 안내](Doom/README.md)에 따라 ROI 변경이 포함된 현재 소스를 빌드하세요.
 2. 열린 DOOM에서 몬스터·아이템이 보이는 곳으로 이동합니다. 게임 엔진의 깨끗한 RGB 입력과 그 프레임의 ROI 좌표를 0.5초마다 함께 저장합니다. 최대 60장 또는 2분 후 자동 종료됩니다.

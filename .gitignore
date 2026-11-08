@@ -1,6 +1,7 @@
 # Reinstallable dependencies and machine-local environments
 node_modules/
 .venv/
+.avion-runtime/
 venv/
 
 # IDE settings (including absolute paths specific to this computer)
@@ -36,6 +37,12 @@ htmlcov/
 /dist/
 /build/
 *.exe
+# The portable ROI-enabled Doom executable is intentionally shipped in Git.
+!/Doom/runtime/win-x64/chocolate-doom.exe
+/Doom/runtime/win-x64/*.cfg
+/Doom/runtime/win-x64/*.lmp
+/Doom/runtime/win-x64/*.dsg
+/Doom/runtime/win-x64/savegames/
 /electron/dist/
 /electron/native/capture-host/build*/
 /Doom/build*/
