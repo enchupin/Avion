@@ -1,12 +1,16 @@
 @echo off
+setlocal
 set "ROOT=%~dp0"
 set "EXE=%ROOT%build-local\src\Release\chocolate-doom.exe"
 set "IWAD=%ROOT%iwads\freedoom-0.13.0\freedoom-0.13.0\freedoom2.wad"
 
+if not exist "%EXE%" set "EXE=%ROOT%runtime\win-x64\chocolate-doom.exe"
 if not exist "%EXE%" set "EXE=%ROOT%build-local\src\Debug\chocolate-doom.exe"
 
 if not exist "%EXE%" (
-    echo chocolate-doom.exe was not found. Build Doom first.
+    echo chocolate-doom.exe was not found.
+    echo Download or pull the complete kjw branch, including Doom\runtime\win-x64.
+    echo Optional rebuild script: Doom\scripts\package-windows.ps1
     pause
     exit /b 1
 )
@@ -19,3 +23,4 @@ if not exist "%IWAD%" (
 )
 
 start "" /D "%ROOT%.." "%EXE%" -window -srcompare -srlatency -iwad "%IWAD%" %*
+exit /b %ERRORLEVEL%

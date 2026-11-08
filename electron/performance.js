@@ -72,9 +72,12 @@ function registerPerformance ({ app, ipcMain, dialog, shell, BrowserWindow, wind
   function startRecording () {
     if (child || doom) throw new Error('현재 측정 또는 장면 수집을 종료하세요.')
     const gameRoot = app.isPackaged ? path.join(process.resourcesPath, 'Doom') : path.resolve(__dirname, '..', 'Doom')
-    const exe = path.join(gameRoot, 'build-local', 'src', 'Release', 'chocolate-doom.exe')
+    const exe = [
+      path.join(gameRoot, 'build-local', 'src', 'Release', 'chocolate-doom.exe'),
+      path.join(gameRoot, 'runtime', 'win-x64', 'chocolate-doom.exe')
+    ].find(candidate => fs.existsSync(candidate))
     const iwad = path.join(gameRoot, 'iwads', 'freedoom-0.13.0', 'freedoom-0.13.0', 'freedoom2.wad')
-    if (!fs.existsSync(exe) || !fs.existsSync(iwad)) throw new Error('ROI 지원 DOOM 실행 파일 또는 Freedoom2 WAD가 없습니다. README의 DOOM 빌드·설치 절차를 먼저 진행하세요.')
+    if (!exe || !fs.existsSync(iwad)) throw new Error('ROI 지원 DOOM 실행 파일 또는 Freedoom2 WAD가 없습니다. Doom/runtime과 Doom/iwads를 포함한 전체 저장소를 내려받으세요. 자세한 내용은 Doom/README.md를 확인하세요.')
     fs.mkdirSync(outputRoot, { recursive: true })
     const directory = path.join(outputRoot, `doom-scenes-${Date.now()}-${randomUUID().slice(0, 8)}`)
     let stderr = ''

@@ -85,17 +85,21 @@ Get-ChildItem -LiteralPath (Join-Path $sourceSr "IMDN\Test_Datasets\Set5") -Filt
 Write-Host "Packaged Avion app at $appExe"
 Write-Host "Bundled native host at $nativeHost"
 
-# The existing Freedoom build is optional; evaluation of saved ROI data always works.
+# Ship the portable runtime, including its provenance and redistribution notices.
 $sourceDoom = Join-Path (Split-Path -Parent $root) "Doom"
 $bundledDoom = Join-Path $packageDir "resources\Doom"
-$doomExe = Join-Path $sourceDoom "build-local\src\Release\chocolate-doom.exe"
+$doomExe = Join-Path $sourceDoom "runtime\win-x64\chocolate-doom.exe"
 $doomWad = "iwads\freedoom-0.13.0\freedoom-0.13.0\freedoom2.wad"
 if ((Test-Path -LiteralPath $doomExe) -and (Test-Path -LiteralPath (Join-Path $sourceDoom $doomWad))) {
-  $doomBin = Join-Path $bundledDoom "build-local\src\Release"
+  $doomBin = Join-Path $bundledDoom "runtime\win-x64"
   New-Item -ItemType Directory -Path $doomBin -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $sourceDoom "COPYING.md") -Destination $bundledDoom -Force
+  Copy-Item -LiteralPath (Join-Path $sourceDoom "AUTHORS") -Destination $bundledDoom -Force
   Get-ChildItem -LiteralPath (Split-Path -Parent $doomExe) -File | Where-Object { $_.Extension -in '.exe', '.dll' } | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $doomBin -Force
+  }
+  foreach ($notice in @('licenses', 'build-info.json')) {
+    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $doomExe) $notice) -Destination $doomBin -Recurse -Force
   }
   $wadTarget = Join-Path $bundledDoom $doomWad
   New-Item -ItemType Directory -Path (Split-Path -Parent $wadTarget) -Force | Out-Null

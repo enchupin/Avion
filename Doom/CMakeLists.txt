@@ -55,6 +55,17 @@ else()
     add_compile_definitions(DISABLE_SDL2NET=1)
 endif()
 
+# SDL's static CMake packages use a -static suffix; keep the target names
+# used throughout the engine available for portable Windows builds as well.
+foreach(SDL_LIBRARY SDL2 SDL2_mixer SDL2_net)
+    if(NOT TARGET ${SDL_LIBRARY}::${SDL_LIBRARY}
+       AND TARGET ${SDL_LIBRARY}::${SDL_LIBRARY}-static)
+        add_library(${SDL_LIBRARY}::${SDL_LIBRARY} INTERFACE IMPORTED)
+        set_target_properties(${SDL_LIBRARY}::${SDL_LIBRARY} PROPERTIES
+            INTERFACE_LINK_LIBRARIES ${SDL_LIBRARY}::${SDL_LIBRARY}-static)
+    endif()
+endforeach()
+
 
 # Check for libsamplerate.
 find_package(SampleRate)
@@ -63,6 +74,9 @@ if(SampleRate_FOUND)
 endif()
 
 # Check for libpng.
+# libpng's static config expects the standard ZLIB::ZLIB target. Newer
+# zlib config packages can expose only ZLIB::ZLIBSTATIC instead.
+find_package(ZLIB MODULE QUIET)
 find_package(PNG)
 if(PNG_FOUND)
     set(HAVE_LIBPNG TRUE)
