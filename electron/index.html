@@ -6,161 +6,65 @@
     <meta http-equiv="X-Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="./styles.css">
-    <title>Avion Capture</title>
+    <title>Avion · DOOM &amp; SR</title>
   </head>
   <body>
     <main class="app">
       <div class="tool-grid">
-        <section class="control-panel" aria-label="Capture control">
+        <section class="control-panel game-panel" aria-label="DOOM 실행 및 환경 설정">
           <div class="panel-header">
-            <div>
-              <p class="eyebrow">Avion</p>
-              <h1>Game Capture</h1>
-            </div>
-            <div id="status-pill" class="status-pill">Idle</div>
+            <div><p class="eyebrow">DOOM &amp; Super Resolution</p><h1>DOOM 실행</h1></div>
+            <div id="doom-status" class="status-pill">대기</div>
           </div>
-
-          <button id="capture-toggle" class="toggle-button" type="button" aria-pressed="false">
-            <span class="power-light" aria-hidden="true"></span>
-            <span id="capture-toggle-label">OFF</span>
-          </button>
-
-          <div class="capture-options">
-            <label class="option-toggle">
-              <input id="one-fps-toggle" type="checkbox">
-              <span>1 FPS PNG</span>
-            </label>
-          </div>
-
-          <div class="capture-meta">
-            <div>
-              <span class="meta-label">Source</span>
-              <strong>Primary display</strong>
-            </div>
-            <div>
-              <span class="meta-label">Engine</span>
-              <strong>C++ Windows Graphics Capture</strong>
-            </div>
-          </div>
-
-          <p id="capture-message" class="panel-message">Ready</p>
-        </section>
-
-        <section class="control-panel" aria-label="Frame extraction">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Frames</p>
-              <h2>Frame Splitter</h2>
-            </div>
-            <div id="video-status-pill" class="status-pill">Idle</div>
-          </div>
-
-          <div class="video-actions">
-            <button id="video-extract-button" class="action-button" type="button">Select Source</button>
-            <button id="video-open-output-button" class="action-button secondary" type="button" hidden>Open Folder</button>
-          </div>
-
-          <div class="capture-meta video-meta">
-            <div>
-              <span class="meta-label">FPS</span>
-              <strong id="video-fps-value">--</strong>
-            </div>
-            <div>
-              <span class="meta-label">Frames</span>
-              <strong id="video-frame-count">--</strong>
-            </div>
-            <div>
-              <span class="meta-label">Duration</span>
-              <strong id="video-duration">--</strong>
-            </div>
-            <div>
-              <span class="meta-label">Size</span>
-              <strong id="video-size">--</strong>
-            </div>
-          </div>
-
-          <progress id="video-progress" class="video-progress" max="100" value="0" hidden></progress>
-          <p id="video-message" class="panel-message">Ready</p>
-        </section>
-        <section class="control-panel performance-panel" aria-label="성능 평가">
-          <div class="panel-header">
-            <div><p class="eyebrow">Performance Evaluation</p><h2>SR 성능 평가</h2></div>
-            <div id="benchmark-status" class="status-pill">대기</div>
-          </div>
-          <p class="benchmark-intro">같은 DOOM 장면으로 전체 프레임 SR과 오브젝트 ROI SR의 화질·처리 속도·GPU 사용률을 비교합니다.</p>
+          <p class="panel-intro">실행 환경을 확인하고 SR 방식을 선택해 DOOM을 실행하세요.</p>
           <section class="sr-environment" aria-labelledby="sr-environment-title">
             <div class="panel-header">
               <h3 id="sr-environment-title">SR 실행 환경</h3>
               <button id="sr-check" type="button" class="action-button secondary">설치 여부 확인</button>
             </div>
-            <p class="benchmark-caption">먼저 설치 여부를 확인한 뒤, 필요한 항목의 설치 버튼을 누르세요. 최초 설치에는 인터넷 연결이 필요합니다.</p>
+            <p class="panel-caption">먼저 설치 여부를 확인한 뒤, 필요한 항목의 설치 버튼을 누르세요. 최초 설치에는 인터넷 연결이 필요합니다.</p>
             <ul id="sr-components" class="sr-components" aria-label="환경 설치 상태"></ul>
             <div id="sr-gpu" class="sr-gpu" role="status">GPU SR: 아직 확인하지 않았습니다.</div>
-            <p class="benchmark-caption">PyTorch 자동 설치는 CPU용입니다. GPU SR에는 지원 NVIDIA GPU·드라이버와 CUDA용 PyTorch가 필요합니다.</p>
-            <progress id="sr-progress" class="video-progress" hidden aria-label="환경 작업 진행률"></progress>
+            <p class="panel-caption">PyTorch 자동 설치는 CPU용입니다. GPU SR에는 지원 NVIDIA GPU·드라이버와 CUDA용 PyTorch가 필요합니다.</p>
+            <progress id="sr-progress" class="progress-bar" hidden aria-label="환경 작업 진행률"></progress>
             <p id="sr-message" class="panel-message" role="status" aria-live="polite">설치 여부 확인을 눌러 시작하세요.</p>
             <button id="sr-cancel" type="button" class="action-button secondary" hidden>작업 취소</button>
-            <details class="benchmark-protocol"><summary>진단 내용과 설치 로그</summary>
-              <p id="sr-path" class="benchmark-caption"></p>
+            <details class="details-panel"><summary>진단 내용과 설치 로그</summary>
+              <p id="sr-path" class="panel-caption"></p>
               <pre id="sr-details" class="sr-log"></pre>
               <pre id="sr-log" class="sr-log"></pre>
             </details>
           </section>
-          <div class="video-actions">
-            <button id="benchmark-play" type="button" class="action-button" disabled>ROI 게임 실행</button>
-            <button id="benchmark-record" type="button" class="action-button">DOOM 장면 수집</button>
-            <button id="benchmark-record-stop" type="button" class="action-button secondary" hidden>수집 종료·선택</button>
-            <button type="button" class="action-button secondary" data-source="roi">기존 DOOM ROI 데이터</button>
-          </div>
-          <p class="benchmark-caption">DOOM에서 이동하면 원본 프레임과 몬스터·아이템 영역을 함께 저장합니다. 최대 60장 수집 후 DOOM을 종료하고 동일 장면을 반복 측정합니다.</p>
-          <div class="video-actions benchmark-inputs">
-            <button type="button" class="action-button secondary" data-source="sample">Set5 샘플</button>
-            <button type="button" class="action-button secondary" data-source="folder">게임 프레임 폴더</button>
-            <button type="button" class="action-button secondary" data-source="capture">Avion 캡처</button>
-            <button type="button" class="action-button secondary" data-source="checkpoint">IMDN 가중치 선택</button>
-            <button type="button" class="action-button secondary" data-source="default-checkpoint">기본 가중치</button>
-          </div>
-          <p id="benchmark-source" class="panel-message">입력: Set5 샘플 · 가중치: 기본 IMDN</p>
-          <fieldset id="benchmark-settings" class="benchmark-settings">
-            <legend>측정 조건</legend>
-            <label>확대 배율<select id="benchmark-scale"><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
-            <label>실행 장치<select id="benchmark-device"><option value="auto">자동 선택</option><option value="cuda">CUDA GPU</option><option value="cpu">CPU</option></select></label>
-            <label>평가 모드<select id="benchmark-mode"><option value="reconstruction">축소·복원 (화질 + 속도)</option><option value="native">원본 입력 (속도 · 화질 N/A)</option></select></label>
-            <label>최대 기준 프레임 수<input id="benchmark-frames" type="number" value="5" min="1" max="100"></label>
-            <label>기준 영상 최대 변 (px)<input id="benchmark-edge" type="number" value="512" min="32" max="4096" step="16"></label>
-            <label>프레임별 최소 반복<input id="benchmark-repeats" type="number" value="10" min="1" max="100"></label>
-            <label class="option-toggle"><input id="benchmark-fp16" type="checkbox">FP16 추가 비교 (CUDA)</label>
-            <label class="option-toggle"><input id="benchmark-roi" type="checkbox" disabled>ROI SR 비교 (DOOM ROI 데이터 필요)</label>
-          </fieldset>
-          <div class="video-actions">
-            <button id="benchmark-start" type="button" class="action-button">성능 측정 시작</button>
-            <button id="benchmark-cancel" type="button" class="action-button secondary" hidden>취소</button>
-            <button type="button" class="action-button secondary" data-result="report" hidden>발표용 보고서</button>
-            <button type="button" class="action-button secondary" data-result="csv" hidden>결과 CSV</button>
-            <button type="button" class="action-button secondary" data-result="folder" hidden>결과 폴더</button>
-          </div>
-          <progress id="benchmark-progress" class="video-progress" max="100" value="0" hidden></progress>
-          <p id="benchmark-message" class="panel-message" role="status" aria-live="polite">측정을 시작하면 표와 그래프가 표시됩니다.</p>
-          <div id="benchmark-results" hidden>
-            <p id="benchmark-context" class="benchmark-context"></p>
-            <div class="benchmark-table-wrap"><table class="benchmark-table">
-              <caption>실측 결과 · CPU 보간과 GPU SR의 실행 장치는 다릅니다.</caption>
-              <thead><tr><th>방식</th><th>장치</th><th>전체 PSNR (dB)</th><th>전체 SSIM</th><th>ROI PSNR (dB)</th><th>ROI SSIM</th><th>평균 지연 (ms)</th><th>P95 (ms)</th><th>처리 FPS</th><th>GPU 전체 (%)</th></tr></thead>
-              <tbody id="benchmark-table-body"></tbody>
-            </table></div>
-            <p id="benchmark-execution" class="benchmark-caption"></p>
-            <div id="benchmark-charts" class="benchmark-charts"></div>
-            <h3>동일 프레임 비교</h3>
-            <p id="benchmark-preview-caption" class="benchmark-caption">동일한 입력으로 처리한 결과입니다. 녹색 경계는 패딩 전 오브젝트 영역이며 결과 이미지에는 포함되지 않습니다.</p>
-            <div id="benchmark-previews" class="benchmark-previews"></div>
-            <details class="benchmark-protocol"><summary>측정 조건과 수치 해석</summary><ul id="benchmark-notes"></ul></details>
-          </div>
-          <p class="benchmark-caption">지연·FPS는 프레임 변환 구간 기준이며 캡처·화면 표시 시간을 제외합니다. GPU는 카드 전체 사용량이고, 계측할 수 없는 값은 N/A로 표시합니다.</p>
+          <section class="doom-launcher" aria-labelledby="doom-launcher-title">
+            <h3 id="doom-launcher-title">DOOM 실행</h3>
+            <p class="panel-caption">1. SR 방식과 배율 선택 → 2. DOOM 실행. SR 입력(320×200, 픽셀 그대로)과 SR 결과를 두 창에서 비교합니다.</p>
+            <fieldset id="doom-settings" class="settings-grid">
+              <legend>실시간 SR 설정</legend>
+              <label>SR 방식<select id="doom-method" aria-describedby="doom-description">
+                <option value="imdn-roi">ROI SR · FP32</option>
+                <option value="imdn-roi-fp16" disabled>ROI SR · FP16 (CUDA)</option>
+                <option value="imdn">전체 SR · FP32</option>
+                <option value="imdn-fp16" disabled>전체 SR · FP16 (CUDA)</option>
+                <option value="bicubic">바이큐빅 (Bicubic)</option>
+                <option value="bilinear">바이리니어 (Bilinear)</option>
+                <option value="nearest">최근접 보간 (Nearest)</option>
+              </select></label>
+              <label>확대 배율<select id="doom-scale"><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
+              <label>실행 장치<select id="doom-device"><option value="auto">자동 선택</option><option value="cuda" disabled>CUDA GPU</option><option value="cpu">CPU</option></select></label>
+              <label class="option-toggle"><input id="doom-debug" type="checkbox" checked>SR 결과에 ROI 영역 표시</label>
+            </fieldset>
+            <p id="doom-description" class="panel-caption"></p>
+            <p id="doom-availability" class="panel-caption">SR 실행 환경에서 설치 여부를 먼저 확인하세요.</p>
+            <div class="action-row">
+              <button id="doom-play" type="button" class="action-button" disabled>선택한 방식으로 DOOM 실행</button>
+              <button id="doom-stop" type="button" class="action-button secondary" hidden>DOOM 종료</button>
+            </div>
+            <p id="doom-message" class="panel-message" role="status" aria-live="polite">SR 방식을 선택하고 DOOM을 실행하세요.</p>
+          </section>
         </section>
       </div>
     </main>
-    <script src="./renderer.js"></script>
-    <script src="./performance-renderer.js"></script>
+    <script src="./doom-renderer.js"></script>
     <script src="./environment-renderer.js"></script>
   </body>
 </html>

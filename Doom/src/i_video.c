@@ -329,6 +329,10 @@ static void AdjustWindowSize(void)
 {
     int logical_width;
 
+    // The SR input window displays the 320x200 buffer without aspect correction.
+    if (sr_compare_mode)
+        return;
+
     logical_width = LogicalScreenWidth();
 
     if (aspect_ratio_correct || integer_scaling)
@@ -817,8 +821,13 @@ static void UpdateSRWindowTitle(boolean sr_active)
         return;
     if (sr_compare_mode)
     {
-        SetWindowTitleStatus(" [Original game]");
-        SDL_SetWindowTitle(sr_screen, status);
+        char input_title[80], output_title[160];
+        M_snprintf(input_title, sizeof(input_title),
+                   " [SR input %dx%d | 1:1 pixels]", SCREENWIDTH, SCREENHEIGHT);
+        M_snprintf(output_title, sizeof(output_title),
+                   "SR output %dx%d | %s", sr_texture_width, sr_texture_height, status);
+        SetWindowTitleStatus(input_title);
+        SDL_SetWindowTitle(sr_screen, output_title);
     }
     else
         SetWindowTitleStatus(status);
@@ -852,22 +861,51 @@ static boolean RenderSRFrame(void)
         && SDL_RenderCopy(target, sr_texture, NULL, NULL) == 0;
 }
 
-static void DrawROIDebug(void)
+static void RenderSRInput(void)
+{
+    int w, h;
+    SDL_Rect dest = {0, 0, SCREENWIDTH, SCREENHEIGHT};
+    SDL_GetRendererOutputSize(renderer, &w, &h);
+    dest.x = SDL_max(0, (w - SCREENWIDTH) / 2);
+    dest.y = SDL_max(0, (h - SCREENHEIGHT) / 2);
+    // No intermediate upscaled texture, smoothing, aspect correction or overlay.
+    // These are the same pixels copied into sr_input immediately before this call.
+    SDL_SetRenderTarget(renderer, NULL);
+    SDL_RenderCopy(renderer, texture, NULL, &dest);
+
+    // Opt-in readback for the headless renderer integration check. Never enabled
+    // in normal gameplay; verify actual presented RGB against the worker payload.
+    if (M_ParmExists("-srverifyinput"))
+    {
+        byte pixels[SCREENWIDTH * SCREENHEIGHT * 4];
+        int i;
+        if (SDL_RenderReadPixels(renderer, &dest, SDL_PIXELFORMAT_ARGB8888,
+                                 pixels, SCREENWIDTH * 4) != 0)
+            I_Error("SR input readback failed: %s", SDL_GetError());
+        for (i = 0; i < sizeof(pixels); i += 4)
+            if (memcmp(pixels + i, sr_input + i, 3) != 0)
+                I_Error("SR input display differs from worker input at pixel %d", i / 4);
+        fprintf(stderr, "SR input verified: %dx%d, 1:1 RGB matches worker input (viewport %dx%d)\n",
+                SCREENWIDTH, SCREENHEIGHT, w, h);
+    }
+}
+
+static void DrawROIDebug(SDL_Renderer *target)
 {
     const sr_roi_t *regions;
     int i, n, w, h;
     if (!I_SR_ROIMode() || !M_ParmExists("-srroi-debug")) return;
     n = I_SR_GetROIs(&regions);
-    SDL_RenderGetLogicalSize(renderer, &w, &h);
-    if (!w || !h) SDL_GetRendererOutputSize(renderer, &w, &h);
-    SDL_SetRenderDrawColor(renderer, 0, 255, 80, 255);
+    SDL_RenderGetLogicalSize(target, &w, &h);
+    if (!w || !h) SDL_GetRendererOutputSize(target, &w, &h);
+    SDL_SetRenderDrawColor(target, 0, 255, 80, 255);
     for (i = 0; i < n; ++i)
     {
         SDL_Rect rect = {regions[i].x * w / SCREENWIDTH,
                          regions[i].y * h / SCREENHEIGHT,
                          regions[i].w * w / SCREENWIDTH,
                          regions[i].h * h / SCREENHEIGHT};
-        SDL_RenderDrawRect(renderer, &rect);
+        SDL_RenderDrawRect(target, &rect);
     }
 }
 
@@ -968,7 +1006,8 @@ void I_FinishUpdate (void)
                 AdjustWindowSize();
                 SDL_SetWindowSize(screen, window_width, window_height);
             }
-            CreateUpscaledTexture(false);
+            if (!sr_compare_mode)
+                CreateUpscaledTexture(false);
             need_resize = false;
             palette_to_set = true;
         }
@@ -1044,8 +1083,7 @@ void I_FinishUpdate (void)
     SDL_RenderClear(renderer);
     if (sr_compare_mode)
     {
-        RenderNormalFrame(NULL);
-        DrawROIDebug();
+        RenderSRInput();
         SDL_RenderPresent(renderer);
         SDL_SetRenderDrawColor(sr_renderer, 0, 0, 0, 255);
         SDL_RenderClear(sr_renderer);
@@ -1060,6 +1098,8 @@ void I_FinishUpdate (void)
              && UpdateSRTexture(sr_pixels, sr_width, sr_height, sr_pitch);
     if (sr_active)
         sr_active = RenderSRFrame();
+    if (sr_active)
+        DrawROIDebug(sr_compare_mode ? sr_renderer : renderer);
     if (!sr_active && !sr_compare_mode)
         RenderNormalFrame(NULL);
 
@@ -1212,7 +1252,7 @@ void I_GraphicsCheckCommandLine(void)
     //!
     // @category video
     //
-    // Show the normal renderer and SR output in separate windows.
+    // Show the unscaled SR input and SR output in separate windows.
     //
 
     sr_compare_mode = M_ParmExists("-srcompare")
@@ -1466,6 +1506,11 @@ static void SetVideoMode(void)
 
     w = window_width;
     h = window_height;
+    if (sr_compare_mode)
+    {
+        w = SCREENWIDTH;
+        h = SCREENHEIGHT;
+    }
 
     // In windowed mode, the window can be resized while the game is
     // running.
@@ -1473,7 +1518,8 @@ static void SetVideoMode(void)
 
     // Set the highdpi flag - this makes a big difference on Macs with
     // retina displays, especially when using small window sizes.
-    window_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+    if (!sr_compare_mode)
+        window_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
 
     if (fullscreen)
     {
@@ -1518,7 +1564,8 @@ static void SetVideoMode(void)
             SDL_GetError());
         }
 
-        SDL_SetWindowMinimumSize(screen, logical_width, actualheight);
+        SDL_SetWindowMinimumSize(screen, logical_width,
+                                 sr_compare_mode ? SCREENHEIGHT : actualheight);
 
         I_InitWindowTitle();
         I_InitWindowIcon();
@@ -1593,33 +1640,38 @@ static void SetVideoMode(void)
     {
         if (sr_screen == NULL)
         {
-            int sx, sy, sw, sh;
+            int sx, sy, sw, sh, scale;
+            const char *scale_env = getenv("AVION_SR_SCALE");
             SDL_Rect bounds;
+            scale = scale_env == NULL ? 2 : atoi(scale_env);
+            if (scale < 2 || scale > 4) scale = 2;
             SDL_GetWindowPosition(screen, &sx, &sy);
-            SDL_GetWindowSize(screen, &sw, &sh);
-            // Keep both windows visible even if the saved size was a wide
-            // single-window comparison layout.
+            sw = SCREENWIDTH * scale;
+            sh = SCREENHEIGHT * scale;
+            // Input starts at its real resolution; only the SR output window
+            // may be fitted to the available desktop area.
             if (SDL_GetDisplayUsableBounds(video_display, &bounds) == 0)
             {
-                sw = (bounds.w - 48) / 2;
-                sh = sw * actualheight / SCREENWIDTH;
+                if (sw > bounds.w - SCREENWIDTH - 48)
+                {
+                    sw = SDL_max(SCREENWIDTH, bounds.w - SCREENWIDTH - 48);
+                    sh = sw * SCREENHEIGHT / SCREENWIDTH;
+                }
                 if (sh > bounds.h - 100)
                 {
-                    sh = bounds.h - 100;
-                    sw = sh * SCREENWIDTH / actualheight;
+                    sh = SDL_max(SCREENHEIGHT, bounds.h - 100);
+                    sw = sh * SCREENWIDTH / SCREENHEIGHT;
                 }
-                if (sw < SCREENWIDTH) sw = SCREENWIDTH;
-                if (sh < actualheight) sh = actualheight;
                 sx = bounds.x + 12;
                 sy = bounds.y + 40;
-                SDL_SetWindowSize(screen, sw, sh);
+                SDL_SetWindowSize(screen, SCREENWIDTH, SCREENHEIGHT);
                 SDL_SetWindowPosition(screen, sx, sy);
             }
-            sr_screen = SDL_CreateWindow("SR starting...", sx + sw + 12, sy,
+            sr_screen = SDL_CreateWindow("SR starting...", sx + SCREENWIDTH + 12, sy,
                                          sw, sh, SDL_WINDOW_RESIZABLE);
             if (sr_screen == NULL)
                 I_Error("Error creating SR window: %s", SDL_GetError());
-            SDL_SetWindowMinimumSize(sr_screen, SCREENWIDTH, actualheight);
+            SDL_SetWindowMinimumSize(sr_screen, SCREENWIDTH, SCREENHEIGHT);
             SDL_RaiseWindow(screen);
         }
         sr_renderer = SDL_CreateRenderer(sr_screen, -1, renderer_flags);
@@ -1627,7 +1679,7 @@ static void SetVideoMode(void)
             sr_renderer = SDL_CreateRenderer(sr_screen, -1, SDL_RENDERER_SOFTWARE);
         if (sr_renderer == NULL)
             I_Error("Error creating SR renderer: %s", SDL_GetError());
-        SDL_RenderSetLogicalSize(sr_renderer, SCREENWIDTH, actualheight);
+        SDL_RenderSetLogicalSize(sr_renderer, SCREENWIDTH, SCREENHEIGHT);
         SDL_RenderSetIntegerScale(sr_renderer, integer_scaling);
         sr_window_title_mode = -1;
     }
@@ -1636,7 +1688,13 @@ static void SetVideoMode(void)
     // time this also defines the aspect ratio that is preserved while scaling
     // and stretching the texture into the window.
 
-    if (aspect_ratio_correct || integer_scaling)
+    if (sr_compare_mode)
+    {
+        // Use physical output coordinates: resizing adds borders, not scaling.
+        SDL_RenderSetLogicalSize(renderer, 0, 0);
+        SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+    }
+    else if (aspect_ratio_correct || integer_scaling)
     {
         SDL_RenderSetLogicalSize(renderer,
                                  logical_width,
@@ -1645,7 +1703,7 @@ static void SetVideoMode(void)
 
     // Force integer scales for resolution-independent rendering.
 
-    SDL_RenderSetIntegerScale(renderer, integer_scaling);
+    SDL_RenderSetIntegerScale(renderer, sr_compare_mode ? SDL_FALSE : integer_scaling);
 
     // Blank out the full screen area in case there is any junk in
     // the borders that won't otherwise be overwritten.
@@ -1721,7 +1779,8 @@ static void SetVideoMode(void)
 
     // Initially create the upscaled texture for rendering to screen
 
-    CreateUpscaledTexture(true);
+    if (!sr_compare_mode)
+        CreateUpscaledTexture(true);
 }
 
 void I_InitGraphics(void)

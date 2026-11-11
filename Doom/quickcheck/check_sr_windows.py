@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-EXE = ROOT / 'Doom/build-local/src/Release/chocolate-doom.exe'
+EXE = Path(os.environ.get('AVION_TEST_DOOM_EXE', ROOT / 'Doom/build-local/src/Release/chocolate-doom.exe'))
 IWAD = ROOT / 'Doom/iwads/freedoom-0.13.0/freedoom-0.13.0/freedoom2.wad'
 WORKER = '''import struct, sys, time
 h = struct.Struct('<7I')
@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='avion-sr-') as folder:
                SDL_AUDIODRIVER='dummy', AVION_SR_PYTHON=sys.executable,
                AVION_SR_WORKER=str(worker), AVION_SR='1')
     base = [str(EXE), '-iwad', str(IWAD), '-window', '-nosound', '-nojoy',
-            '-nograbmouse', '-srnoconsole', '-srlatency', '-timedemo', str(demo),
+            '-nograbmouse', '-srnoconsole', '-srlatency', '-srverifyinput', '-timedemo', str(demo),
             '-config', str(temp / 'default.cfg'),
             '-extraconfig', str(temp / 'extra.cfg')]
     for name, extra in [('dual', ['-srcompare']), ('single', []),
@@ -87,6 +87,11 @@ with tempfile.TemporaryDirectory(prefix='avion-sr-') as folder:
         output = (result.stdout + result.stderr).decode(errors='replace')
         # Doom timedemo deliberately exits via I_Error after printing results.
         assert f'{ticks} gametics' in output, output
+        if '-srcompare' in extra:
+            # Actual SDL backbuffer readback must match every RGB byte sent to SR,
+            # including with ROI debug enabled. The source window is native size.
+            verified = re.findall(r'SR input verified: 320x200, 1:1 RGB matches worker input \(viewport (\d+)x(\d+)\)', output)
+            assert len(verified) > 1 and set(verified) == {('320', '200')}, output
         samples = re.findall(r'SR latency \[FALLBACK\] total=([\d.]+) ms.*?roundtrip\+SR=([\d.]+)', output)
         if name == 'disabled':
             assert not samples, output
@@ -97,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix='avion-sr-') as folder:
         if name == 'roi':
             counts = [int(n) for n in re.findall(r'raw regions=(\d+)', output)]
             assert counts and max(counts) > 0, output
-        print(f'{name}: PASS, latency samples={samples}')
+        print(f'{name}: PASS, latency samples={samples}' + ('; native input pixels verified' if '-srcompare' in extra else ''))
     if '--model' in sys.argv:
         env['AVION_SR_WORKER'] = str(ROOT / 'SR/sr_worker.py')
         env['AVION_SR_CHECKPOINT'] = str(ROOT / 'SR/IMDN/checkpoints/IMDN_x2.pth')

@@ -16,12 +16,10 @@ app.whenReady().then(async () => {
     const initial = await win.webContents.executeJavaScript(`({
       label: document.getElementById('sr-check').textContent,
       installs: document.querySelectorAll('#sr-components button').length,
-      blocked: document.getElementById('benchmark-start').disabled,
-      playBlocked: document.getElementById('benchmark-play').disabled
+      playBlocked: document.getElementById('doom-play').disabled
     })`)
     assert.equal(initial.label, '설치 여부 확인')
     assert.equal(initial.installs, 0)
-    assert.equal(initial.blocked, true)
     assert.equal(initial.playBlocked, true)
     const missing = await win.webContents.executeJavaScript(`(() => {
       showEnvironment({ status: 'missing', ready: false });
@@ -43,35 +41,33 @@ app.whenReady().then(async () => {
     const rendered = await win.webContents.executeJavaScript(`({
       rows: document.getElementById('sr-components').textContent,
       gpu: document.getElementById('sr-gpu').textContent,
-      blocked: document.getElementById('benchmark-start').disabled,
-      cudaDisabled: document.querySelector('#benchmark-device option[value="cuda"]').disabled,
-      playBlocked: document.getElementById('benchmark-play').disabled
+      cudaDisabled: document.querySelector('#doom-device option[value="cuda"]').disabled,
+      playBlocked: document.getElementById('doom-play').disabled
     })`)
     assert.match(rendered.rows, /설치됨/)
-    assert.equal(rendered.blocked, false)
     assert.equal(rendered.playBlocked, false)
     assert.equal(rendered.cudaDisabled, !report.report.cuda)
     if (process.env.AVION_TEST_ROI_LAUNCH === '1') {
       const playing = await win.webContents.executeJavaScript(`new Promise(resolve => {
-        const unsubscribe = window.performanceEvaluation.onStatus(state => {
+        const unsubscribe = window.doomGame.onStatus(state => {
           if (['playing', 'failed'].includes(state.status)) { unsubscribe(); resolve(state) }
         });
-        document.getElementById('benchmark-play').click();
+        document.getElementById('doom-play').click();
       })`)
       assert.equal(playing.status, 'playing')
       await new Promise(resolve => setTimeout(resolve, 5000))
       const active = await win.webContents.executeJavaScript(`(async () => ({
-        state: await window.performanceEvaluation.getState(),
-        duplicate: await window.performanceEvaluation.play(),
+        state: await window.doomGame.getState(),
+        duplicate: await window.doomGame.play(),
         setup: await window.srEnvironment.check(),
-        disabled: document.getElementById('benchmark-play').disabled,
-        label: document.getElementById('benchmark-play').textContent
+        disabled: document.getElementById('doom-play').disabled,
+        label: document.getElementById('doom-play').textContent
       }))()`)
       assert.equal(active.state.status, 'playing', JSON.stringify(active))
       assert.ok(active.duplicate.error)
       assert.ok(active.setup.error)
       assert.equal(active.disabled, true)
-      assert.equal(active.label, 'ROI 게임 실행 중')
+      assert.equal(active.label, 'DOOM 실행 중')
       console.log('ROI batch launch and busy-state guards passed')
     }
     console.log(JSON.stringify({ status: 'passed', ...rendered }))

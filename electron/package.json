@@ -1,17 +1,16 @@
 {
   "name": "avion",
   "version": "1.0.2",
-  "description": "Avion capture control app",
+  "description": "Avion DOOM launcher with SR environment settings",
   "license": "ISC",
   "author": "",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "build:native": "powershell -ExecutionPolicy Bypass -File ./scripts/build-native.ps1",
-    "extract:frames": "powershell -ExecutionPolicy Bypass -File ./scripts/extract-video-frames.ps1",
     "package": "powershell -ExecutionPolicy Bypass -File ./scripts/package-app.ps1",
     "start": "electron .",
     "test": "node --test tests/*.test.js",
+    "test:doom": "electron tests/doom-smoke.cjs",
     "test:sr": "python -B -m unittest discover -s ../SR -p test_*.py"
   },
   "devDependencies": {

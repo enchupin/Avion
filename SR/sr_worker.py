@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import struct
 import sys
@@ -21,6 +22,18 @@ RECT = struct.Struct("<4I")
 FRAME_FLAG_ROI = 0x4
 FRAME_FLAG_BACKGROUND = 0x8
 FRAME_FLAG_BUDGET = 0x10
+LIVE_METHODS = ('auto', 'imdn', 'imdn-fp16', 'imdn-roi', 'imdn-roi-fp16',
+                'nearest', 'bilinear', 'bicubic')
+
+
+def publish_status(status, **details):
+    """Optional Electron status channel; stdout remains the binary frame protocol."""
+    filename = os.environ.get('AVION_SR_STATUS_FILE')
+    if filename:
+        temporary = filename + '.tmp'
+        with open(temporary, 'w', encoding='utf-8') as stream:
+            json.dump({'status': status, **details}, stream, ensure_ascii=True)
+        os.replace(temporary, filename)
 
 
 def prepare_regions(regions, width, height, margin=12):
@@ -143,7 +156,7 @@ def load_imdn(checkpoint: str, scale: int, device_name: str, strict_model: bool)
         return None, None, None
 
 
-def fallback_upscale(rgb: np.ndarray, scale: int, mode: str) -> np.ndarray:
+def fallback_upscale(rgb: np.ndarray, scale: int, mode: str, strict=False) -> np.ndarray:
     if mode == "nearest":
         return np.repeat(np.repeat(rgb, scale, axis=0), scale, axis=1)
 
@@ -161,15 +174,20 @@ def fallback_upscale(rgb: np.ndarray, scale: int, mode: str) -> np.ndarray:
             interpolation=interpolation,
         )
     except Exception:
+        if strict:
+            raise
         return np.repeat(np.repeat(rgb, scale, axis=0), scale, axis=1)
 
 
 def model_upscale(torch, model, device, rgb: np.ndarray) -> np.ndarray:
     input_tensor = torch.from_numpy(rgb).to(device=device)
-    input_tensor = input_tensor.permute(2, 0, 1).unsqueeze(0).float().div_(255.0)
+    input_tensor = input_tensor.permute(2, 0, 1).unsqueeze(0).to(dtype=next(model.parameters()).dtype).div_(255.0)
 
     with torch.no_grad():
-        output = model(input_tensor).clamp_(0.0, 1.0)
+        output = model(input_tensor)
+        if not torch.isfinite(output).all().item():
+            raise ValueError('IMDN output contains NaN/Infinity')
+        output = output.clamp_(0.0, 1.0)
 
     output = output.squeeze(0).permute(1, 2, 0).mul_(255.0).byte()
     return output.cpu().numpy()
@@ -195,12 +213,19 @@ def rgb_to_argb8888_bytes(rgb: np.ndarray) -> tuple[bytes, int, int, int]:
 
 def process_frames(args) -> int:
     checkpoint = args.checkpoint or default_checkpoint(args.scale)
-    torch, model, device = load_imdn(
-        checkpoint,
-        args.scale,
-        args.device,
-        args.strict_model,
-    )
+    interpolation = args.method in ('nearest', 'bilinear', 'bicubic')
+    if interpolation:
+        torch, model, device = None, None, None
+        log(f'using {args.method} x{args.scale} on cpu (no model)')
+    else:
+        torch, model, device = load_imdn(checkpoint, args.scale, args.device,
+                                         args.strict_model or args.method != 'auto')
+        if args.method.endswith('fp16'):
+            if device is None or device.type != 'cuda':
+                raise ValueError('FP16 requires a CUDA GPU')
+            model.half()
+        log(f'precision: {"fp16" if args.method.endswith("fp16") else "fp32"}')
+    announced = False
 
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
@@ -259,7 +284,13 @@ def process_frames(args) -> int:
                 log(f'ROI recording stopped: {exc}')
                 recorder = None
 
-        if magic == ROI_REQUEST_MAGIC:
+        if interpolation:
+            # Explicit interpolation never loads IMDN or silently changes algorithm.
+            output_rgb = fallback_upscale(rgb, args.scale, args.method, strict=True)
+            output_flags = FRAME_FLAG_FALLBACK
+        elif 'roi' in args.method or (args.method == 'auto' and magic == ROI_REQUEST_MAGIC):
+            if magic != ROI_REQUEST_MAGIC:
+                raise ValueError('ROI SR requires engine ROI metadata (-srroi)')
             # Crop sizes vary each frame: avoid cuDNN autotuning every shape.
             if torch is not None:
                 torch.backends.cudnn.benchmark = False
@@ -289,12 +320,17 @@ def process_frames(args) -> int:
         )
         stdout.write(output_payload)
         stdout.flush()
+        if not announced:
+            publish_status('ready', method=args.method, scale=args.scale,
+                           device=str(device) if device is not None else 'cpu')
+            announced = True
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Avion live SR worker")
     parser.add_argument("--checkpoint", default=None)
-    parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument("--scale", type=int, choices=[2, 3, 4], default=2)
+    parser.add_argument("--method", choices=LIVE_METHODS, default=os.environ.get('AVION_SR_METHOD', 'auto'))
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default=os.environ.get("AVION_SR_DEVICE", "auto"))
     parser.add_argument(
         "--fallback",
@@ -302,7 +338,10 @@ def parse_args():
         default="bicubic",
     )
     parser.add_argument("--strict-model", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.method not in LIVE_METHODS or args.device not in ('auto', 'cpu', 'cuda'):
+        parser.error('invalid AVION_SR_METHOD or AVION_SR_DEVICE')
+    return args
 
 
 if __name__ == "__main__":
@@ -310,4 +349,5 @@ if __name__ == "__main__":
         raise SystemExit(process_frames(parse_args()))
     except Exception as exc:
         log(f"fatal error: {exc}")
+        publish_status('failed', message=str(exc))
         raise

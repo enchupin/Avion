@@ -7,7 +7,6 @@ $outputDir = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } 
 $packageDir = Join-Path $outputDir "Avion-win32-x64"
 $appDir = Join-Path $packageDir "resources\app"
 $appExe = Join-Path $packageDir "Avion.exe"
-$nativeHost = Join-Path $appDir "native\AvionCaptureHost.exe"
 
 Push-Location $root
 try {
@@ -23,7 +22,7 @@ try {
     --no-asar `
     --ignore="node_modules" `
     --ignore="dist" `
-    --ignore="native[\\/]capture-host" `
+    --ignore="native" `
     --ignore="scripts" `
     --ignore="tests" `
     --ignore="package-lock\.json"
@@ -40,14 +39,10 @@ if (-not (Test-Path $appExe)) {
   throw "Expected packaged app was not found at $appExe."
 }
 
-if (-not (Test-Path $nativeHost)) {
-  throw "Expected native host was not found at $nativeHost."
-}
-
 $pathsToRemove = @(
   (Join-Path $appDir ".idea"),
   (Join-Path $appDir "scripts"),
-  (Join-Path $appDir "native\capture-host"),
+  (Join-Path $appDir "native"),
   (Join-Path $appDir "node_modules"),
   (Join-Path $appDir "package-lock.json")
 )
@@ -63,12 +58,11 @@ foreach ($pathToRemove in $pathsToRemove) {
   }
 }
 
-# Ship the evaluation worker, architecture, sample images and existing weights.
+# Ship the live SR worker, environment probe, architecture and weights.
 # The environment panel installs Python/PyTorch into writable user data on demand.
 $sourceSr = Join-Path (Split-Path -Parent $root) "SR"
 $bundledSr = Join-Path $packageDir "resources\SR"
-$evaluationFiles = @(
-  "benchmark.py",
+$runtimeFiles = @(
   "roi_dataset.py",
   "sr_worker.py",
   "IMDN\utils.py",
@@ -80,23 +74,16 @@ $evaluationFiles = @(
   "IMDN\checkpoints\IMDN_x3.pth",
   "IMDN\checkpoints\IMDN_x4.pth"
 )
-foreach ($relativeFile in $evaluationFiles) {
+foreach ($relativeFile in $runtimeFiles) {
   $sourceFile = Join-Path $sourceSr $relativeFile
   $destinationFile = Join-Path $bundledSr $relativeFile
   if (-not (Test-Path -LiteralPath $sourceFile)) {
-    throw "Missing evaluation dependency: $sourceFile"
+    throw "Missing SR runtime dependency: $sourceFile"
   }
   New-Item -ItemType Directory -Path (Split-Path -Parent $destinationFile) -Force | Out-Null
   Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force
 }
-$sampleDirectory = Join-Path $bundledSr "IMDN\Test_Datasets\Set5"
-New-Item -ItemType Directory -Path $sampleDirectory -Force | Out-Null
-Get-ChildItem -LiteralPath (Join-Path $sourceSr "IMDN\Test_Datasets\Set5") -Filter "*.bmp" | ForEach-Object {
-  Copy-Item -LiteralPath $_.FullName -Destination $sampleDirectory -Force
-}
-
 Write-Host "Packaged Avion app at $appExe"
-Write-Host "Bundled native host at $nativeHost"
 
 # Ship the portable runtime, including its provenance and redistribution notices.
 $sourceDoom = Join-Path (Split-Path -Parent $root) "Doom"

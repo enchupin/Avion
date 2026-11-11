@@ -210,7 +210,7 @@ function createEnvironmentManager (options, dependencies = {}) {
 
   function startOperation (kind, component) {
     if (active) return active
-    if (options.isInUse?.()) return Promise.resolve({ error: '측정 또는 DOOM 수집을 종료한 뒤 환경을 확인·설치하세요.' })
+    if (options.isInUse?.()) return Promise.resolve({ error: 'DOOM을 종료한 뒤 환경을 확인·설치하세요.' })
     if (kind === 'install') {
       if (!Object.hasOwn(COMPONENTS, component)) return Promise.resolve({ error: '지원하지 않는 설치 항목입니다.' })
       if (state.status === 'idle') return Promise.resolve({ error: '먼저 설치 여부 확인을 눌러주세요.' })
